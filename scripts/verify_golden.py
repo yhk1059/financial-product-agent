@@ -1,6 +1,6 @@
 """골든 데이터셋 정답 SQL을 실행·검사하고 정답 스냅샷과 검토표를 만든다.
 
-uv run python scripts/verify_golden.py [--version v0]
+uv run python scripts/verify_golden.py [--version v1]
 
 출력:
 - golden/gold_results_{version}.json : 문항별 정답 결과 스냅샷, 선택지별 결과, 경고
@@ -160,7 +160,7 @@ def write_review_sheet(questions: list[dict], results: dict[str, dict], version:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--version", default="v0")
+    parser.add_argument("--version", default="v1")
     args = parser.parse_args()
 
     questions = yaml.safe_load((GOLDEN_DIR / f"questions_{args.version}.yaml").read_text())

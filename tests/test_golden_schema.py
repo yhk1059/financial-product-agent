@@ -9,7 +9,7 @@ import yaml
 from portfolio_agent.config import ALLOWED_TABLES, PROJECT_ROOT
 
 GOLDEN = PROJECT_ROOT / "golden"
-QUESTIONS = yaml.safe_load((GOLDEN / "questions_v0.yaml").read_text())
+QUESTIONS = yaml.safe_load((GOLDEN / "questions_v1.yaml").read_text())
 POLICIES = set(re.findall(r"\*\*(P-[A-Z]+)\*\*", (GOLDEN / "design.md").read_text()))
 
 REQUIRED = {"id", "category", "difficulty", "tables", "question", "interpretation", "policy_refs", "answer_type"}

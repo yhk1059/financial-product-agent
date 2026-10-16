@@ -1,6 +1,6 @@
-# 골든 데이터셋 v0 초안 (30문항)
+# 골든 데이터셋 v1 (30문항, 2026-10-16 사용자 검토 확정)
 # 설계·정책 정의: golden/design.md
-# 정답 스냅샷: golden/gold_results_v0.json (scripts/verify_golden.py가 생성)
+# 정답 스냅샷: golden/gold_results_v1.json (scripts/verify_golden.py가 생성)
 
 # ───────────────────────── C1 조건 탐색 ─────────────────────────
 - id: C1-01
@@ -209,26 +209,27 @@
 
 - id: C2-05
   category: C2
-  difficulty: medium
+  difficulty: easy
   tables: [prfd01n001]
-  question: 판매중인 공모 MMF 순자산 합계가 얼마야?
-  interpretation: 판매중·공모, 제로인 대유형 MMF 클래스의 순자산(fd_nast_suma) 합계(원).
-  policy_refs: [P-SALE, P-NULL, P-ASSET, P-UNITS]
-  answer_type: scalar
+  question: 판매중인 공모 MMF 클래스는 몇 개야?
+  interpretation: 판매중·공모이고 제로인 대유형이 MMF인 펀드 클래스 수.
+  policy_refs: [P-SALE, P-UNIT, P-ASSET]
+  answer_type: count
   gold_sql: |
-    SELECT SUM(fd_nast_suma) AS total_net_assets
+    SELECT COUNT(*) AS class_count
     FROM prfd01n001
     WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모' AND zrin_btyp_nm = 'MMF'
-  key_columns: [total_net_assets]
+  key_columns: [class_count]
+  must_mention: [클래스 기준 개수]
   decision_needed:
     question: MMF 구분을 제로인 대유형(zrin_btyp_nm)과 운용속성(or_attr_desc) 중 무엇으로 할까?
     resolved: 제로인 대유형 MMF
     options:
       - label: 제로인 대유형 MMF (gold)
-        sql: SELECT SUM(fd_nast_suma) FROM prfd01n001 WHERE sale_yn='판매중' AND prvo_pbff_desc='공모' AND zrin_btyp_nm='MMF'
+        sql: SELECT COUNT(*) FROM prfd01n001 WHERE sale_yn='판매중' AND prvo_pbff_desc='공모' AND zrin_btyp_nm='MMF'
       - label: 운용속성 MMF
-        sql: SELECT SUM(fd_nast_suma) FROM prfd01n001 WHERE sale_yn='판매중' AND prvo_pbff_desc='공모' AND or_attr_desc='MMF'
-  notes: 클래스별 순자산을 합산한다. 클래스 순자산이 모펀드 기준으로 중복 기록되는지는 미확인.
+        sql: SELECT COUNT(*) FROM prfd01n001 WHERE sale_yn='판매중' AND prvo_pbff_desc='공모' AND or_attr_desc='MMF'
+  notes: v0 초안의 '순자산 합계' 질문은 클래스 순자산 중복 여부를 확인할 수 없어 클래스 수 질문으로 교체했다(2026-10-16 결정).
 
 - id: C2-06
   category: C2
@@ -454,36 +455,45 @@
   category: C4
   difficulty: medium
   tables: [prbd01n001]
-  question: 한국전력공사가 발행한 채권을 신용등급별로 몇 종목인지 정리해줘
-  interpretation: 발행기관 '한국전력공사(주)' 채권을 신용등급별 종목 수로 집계(등급 없음 포함).
+  question: 기업은행이 발행한 채권을 신용등급별로 몇 종목인지 정리해줘
+  interpretation: 발행기관 '(주)중소기업은행' 채권을 신용등급별 종목 수로 집계(등급 없음 포함).
   policy_refs: [P-SCOPE, P-UNIT, P-NAME]
   answer_type: table
   gold_sql: |
     SELECT crd_grd, COUNT(DISTINCT pd_no) AS bond_count
     FROM prbd01n001
-    WHERE pd_pbcm = '한국전력공사(주)'
+    WHERE pd_pbcm = '(주)중소기업은행'
     GROUP BY crd_grd
     ORDER BY bond_count DESC
   key_columns: [crd_grd, bond_count]
-  notes: 발행기관명 원문은 '한국전력공사(주)'. 질문의 '한국전력공사'와 매칭해야 한다.
+  notes: 발행기관명 원문은 '(주)중소기업은행'. 질문의 '기업은행'과 매칭해야 한다(P-NAME). 등급이 한 종류뿐인 한국전력공사 대신 등급이 섞인 발행기관으로 교체했다(2026-10-16 결정).
 
 - id: C4-06
   category: C4
   difficulty: hard
-  tables: [pref01n001, pref02n001]
-  question: S&P 500 TR 지수를 벤치마크로 하는 ETF가 국내랑 해외에 각각 몇 개 있어?
-  interpretation: 국내는 Refinitiv 벤치마크(ref_base_index), 해외는 기초지수(cu_base_index)가 'S&P 500 TR'인 ETF 수.
-  policy_refs: [P-PRODUCT, P-NAME, P-NULL]
+  tables: [domestic_etf_holdings, pref01n001]
+  question: KODEX 200이랑 TIGER 200 구성종목 비교해서 한쪽에만 들어있는 종목 알려줘
+  interpretation: 두 ETF의 구성종목(현금성 제외, 종목명 기준)을 비교해 어느 한쪽에만 있는 종목과 그 ETF를 나열한다.
+  policy_refs: [P-NAME, P-CASH]
   answer_type: table
   gold_sql: |
-    SELECT 'domestic' AS market, COUNT(*) AS etf_count FROM pref01n001
-    WHERE pd_grp_no = 'ETF' AND ref_base_index = 'S&P 500 TR'
+    WITH k AS (
+      SELECT DISTINCT h.component_name AS n
+      FROM domestic_etf_holdings h JOIN pref01n001 p ON p.pd_itm_no = h.item_id
+      WHERE p.pd_abrv_nm = 'KODEX 200'
+        AND h.component_name NOT IN ('원화예금', '설정현금액', '원화현금', '현금성자산', '100%현금설정액')
+    ), t AS (
+      SELECT DISTINCT h.component_name AS n
+      FROM domestic_etf_holdings h JOIN pref01n001 p ON p.pd_itm_no = h.item_id
+      WHERE p.pd_abrv_nm = 'TIGER 200'
+        AND h.component_name NOT IN ('원화예금', '설정현금액', '원화현금', '현금성자산', '100%현금설정액')
+    )
+    SELECT 'KODEX 200' AS only_in, n AS component_name FROM k WHERE n NOT IN (SELECT n FROM t)
     UNION ALL
-    SELECT 'overseas', COUNT(*) FROM pref02n001
-    WHERE pd_grp_no = 'ETF' AND cu_base_index = 'S&P 500 TR'
-  key_columns: [market, etf_count]
-  must_mention: [국내 ETF 벤치마크 정보는 일부 결측]
-  notes: 국내 ETF의 ref_base_index는 32% 결측이고, 국내 기초지수(cu_base_index)는 97% 결측이라 Refinitiv 벤치마크를 쓴다.
+    SELECT 'TIGER 200', n FROM t WHERE n NOT IN (SELECT n FROM k)
+    ORDER BY only_in, component_name
+  key_columns: [only_in, component_name]
+  notes: 결측이 많은 벤치마크 컬럼을 쓰던 'S&P 500 TR 국내·해외 ETF 수' 질문을 결측 영향이 없는 ETF 간 구성종목 비교로 교체했다(2026-10-16 결정).
 
 # ───────────────────────── C5 비교 ─────────────────────────
 - id: C5-01
