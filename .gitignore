@@ -18,3 +18,6 @@ wheels/
 .DS_Store
 .idea/
 .vscode/
+
+# Eval outputs
+data/eval_results.json

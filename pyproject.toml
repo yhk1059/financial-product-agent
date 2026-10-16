@@ -1,7 +1,31 @@
 [project]
 name = "portfolio-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "금융상품 테이블 질의응답 SQL 에이전트 (LangGraph + HyperCLOVA X)"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "langchain>=1.4.6",
+    "langchain-naver>=0.1.1",
+    "langgraph>=1.2.15",
+    "psycopg[binary]>=3.3.6",
+    "python-dotenv>=1.2.4",
+    "pyyaml>=6.0.3",
+    "sqlglot>=30.23.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[project.scripts]
+portfolio-agent = "portfolio_agent.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["db: requires PostgreSQL connection", "llm: calls HyperCLOVA X API"]
