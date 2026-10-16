@@ -1,0 +1,554 @@
+# 골든 데이터셋 v0 초안 (30문항)
+# 설계·정책 정의: golden/design.md
+# 정답 스냅샷: golden/gold_results_v0.json (scripts/verify_golden.py가 생성)
+
+# ───────────────────────── C1 조건 탐색 ─────────────────────────
+- id: C1-01
+  category: C1
+  difficulty: medium
+  tables: [prbd01n001]
+  question: 현재 판매 가능한 원화채권 중 신용등급 AA- 이상인 판매 건수를 알려줘
+  interpretation: 당사 판매 물량(trade_price 있음)이고 통화가 KRW이며 등급이 AAA/AA+/AA0/AA-인 채권을 판매 건(행) 기준으로 센다.
+  policy_refs: [P-SALE, P-UNIT, P-GRADE, P-ASSET]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(*) AS bond_count
+    FROM prbd01n001
+    WHERE curr_cd = 'KRW' AND trade_price IS NOT NULL
+      AND crd_grd IN ('AAA', 'AA+', 'AA0', 'AA-')
+  key_columns: [bond_count]
+  must_mention: [판매 가능(당사 판매 물량) 기준, 판매 건 기준 개수]
+  decision_needed:
+    question: 같은 채권이 판매 LOT별로 여러 행이다. 종목 수와 판매 건수 중 무엇을 셀까?
+    resolved: 판매 건(행) 기준
+    options:
+      - label: 종목 기준
+        sql: SELECT COUNT(DISTINCT pd_no) FROM prbd01n001 WHERE curr_cd='KRW' AND trade_price IS NOT NULL AND crd_grd IN ('AAA','AA+','AA0','AA-')
+      - label: 판매 건(행) 기준 (gold)
+        sql: SELECT COUNT(*) FROM prbd01n001 WHERE curr_cd='KRW' AND trade_price IS NOT NULL AND crd_grd IN ('AAA','AA+','AA0','AA-')
+
+- id: C1-02
+  category: C1
+  difficulty: hard
+  tables: [prbd01n001]
+  question: 판매 가능한 채권 중에 AA- 이상이면서 만기가 3년 안에 돌아오는 종목 리스트 뽑아줘
+  interpretation: 판매 물량이 있고 등급 AA- 이상이며 만기일이 2026-08-21로부터 3년 이내인 채권 종목 목록.
+  policy_refs: [P-SALE, P-UNIT, P-GRADE, P-DATE]
+  answer_type: list
+  gold_sql: |
+    SELECT DISTINCT pd_no, pd_nm, crd_grd, mat_dt
+    FROM prbd01n001
+    WHERE trade_price IS NOT NULL
+      AND crd_grd IN ('AAA', 'AA+', 'AA0', 'AA-')
+      AND mat_dt <= DATE '2026-08-21' + INTERVAL '3 years'
+    ORDER BY mat_dt, pd_no
+  key_columns: [pd_no]
+  must_mention: [기준일 2026-08-21]
+  notes: 만기 기준일을 오늘 날짜로 계산하면 결과가 달라진다(P-DATE 검증용).
+
+- id: C1-03
+  category: C1
+  difficulty: easy
+  tables: [pref01n001]
+  question: 연금계좌에서 살 수 있는 미국 주식형 국내 ETF가 몇 개나 돼?
+  interpretation: 국내 상장 ETF 중 연금거래 가능(Y), 투자지역 미국, 투자자산군 주식인 상품 수.
+  policy_refs: [P-SCOPE, P-PRODUCT, P-ASSET]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(*) AS etf_count
+    FROM pref01n001
+    WHERE pd_grp_no = 'ETF' AND pd_pen_tr_yn = 'Y'
+      AND wu_inv_rgn = '미국' AND wu_inv_ast_type = '주식'
+  key_columns: [etf_count]
+
+- id: C1-04
+  category: C1
+  difficulty: medium
+  tables: [pref01n001]
+  question: 매달 분배금 주는 국내 ETF 중에 연환산 분배수익률이 5% 이상인 건 몇 개야?
+  interpretation: 분배주기 M(월), 연환산 분배수익률 5 이상인 국내 ETF 수. 분배정보가 없는 상품은 제외.
+  policy_refs: [P-PRODUCT, P-NULL, P-UNITS]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(*) AS etf_count
+    FROM pref01n001
+    WHERE pd_grp_no = 'ETF' AND pd_dvid_cycl = 'M' AND pd_dvid_yield >= 5
+  key_columns: [etf_count]
+
+- id: C1-05
+  category: C1
+  difficulty: medium
+  tables: [pref02n001]
+  question: 해외 채권형 ETF 중에 보수가 0.1% 이하인 상품은 몇 개야?
+  interpretation: 해외 ETF 중 자산군 Bond, 보수율 0.1 이하인 상품 수. 해외 ETF 보수 0은 실제 값으로 포함.
+  policy_refs: [P-PRODUCT, P-ZERO, P-ASSET, P-UNITS]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(*) AS etf_count
+    FROM pref02n001
+    WHERE pd_grp_no = 'ETF' AND wu_inv_ast_type = 'Bond'
+      AND cu_charge_rt <= 0.1
+  key_columns: [etf_count]
+  decision_needed:
+    question: 보수 0인 상품을 0.1% 이하에 포함할까?
+    resolved: 0 포함
+    options:
+      - label: 0 제외
+        sql: SELECT COUNT(*) FROM pref02n001 WHERE pd_grp_no='ETF' AND wu_inv_ast_type='Bond' AND cu_charge_rt > 0 AND cu_charge_rt <= 0.1
+      - label: 0 포함 (gold)
+        sql: SELECT COUNT(*) FROM pref02n001 WHERE pd_grp_no='ETF' AND wu_inv_ast_type='Bond' AND cu_charge_rt <= 0.1
+
+- id: C1-06
+  category: C1
+  difficulty: medium
+  tables: [prfd01n001]
+  question: 지금 판매중인 공모 해외주식형 펀드 중에 온라인 전용이고 선취수수료 없는 클래스는 몇 개야?
+  interpretation: 판매중·공모·제로인 대유형 해외주식형, 판매채널 온라인, 수수료 유형 수수료미징구인 클래스 수.
+  policy_refs: [P-SALE, P-UNIT, P-ASSET]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(*) AS class_count
+    FROM prfd01n001
+    WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모'
+      AND zrin_btyp_nm = '해외주식형'
+      AND han_clas_sales_channel = '온라인'
+      AND han_clas_fee_type = '수수료미징구'
+  key_columns: [class_count]
+  must_mention: [클래스 기준 개수]
+
+- id: C1-07
+  category: C1
+  difficulty: hard
+  tables: [prfd01n001]
+  question: 판매중인 공모 채권형 펀드 중에 위험등급이 낮은 위험 이하이면서 1년 수익률이 4% 넘는 펀드 몇 개야?
+  interpretation: 판매중·공모·제로인 대유형 채권형, 제로인 위험등급 '낮은 위험' 또는 '매우 낮은 위험', 1년 수익률 4 초과인 클래스 수.
+  policy_refs: [P-SALE, P-UNIT, P-NULL, P-ASSET, P-UNITS]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(*) AS class_count
+    FROM prfd01n001
+    WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모'
+      AND zrin_btyp_nm = '채권형'
+      AND replace(zrin_fd_ivst_risk_grd_nm, ' ', '') IN ('낮은위험', '매우낮은위험')
+      AND fd_yr1_ern_r > 4
+  key_columns: [class_count]
+  notes: 위험등급명에 '높은 위험'/'높은위험'처럼 띄어쓰기 변형이 있어 공백을 제거해 비교한다.
+
+# ───────────────────────── C2 연산·집계 ─────────────────────────
+- id: C2-01
+  category: C2
+  difficulty: easy
+  tables: [pref01n001]
+  question: 국내 ETF를 투자자산군별로 몇 개씩 있는지 정리해줘
+  interpretation: 국내 ETF를 wu_inv_ast_type별로 묶어 개수를 센다.
+  policy_refs: [P-SCOPE, P-PRODUCT]
+  answer_type: table
+  gold_sql: |
+    SELECT wu_inv_ast_type, COUNT(*) AS etf_count
+    FROM pref01n001
+    WHERE pd_grp_no = 'ETF'
+    GROUP BY wu_inv_ast_type
+    ORDER BY etf_count DESC
+  key_columns: [wu_inv_ast_type, etf_count]
+
+- id: C2-02
+  category: C2
+  difficulty: medium
+  tables: [prfd01n001]
+  question: 판매중인 공모펀드의 제로인 대유형별 평균 1년 수익률 보여줘
+  interpretation: 판매중·공모 펀드 클래스를 zrin_btyp_nm별로 묶어 1년 수익률 평균(소수 둘째 자리)을 구한다. 수익률·유형 결측 클래스는 제외.
+  policy_refs: [P-SALE, P-NULL, P-UNITS]
+  answer_type: table
+  gold_sql: |
+    SELECT zrin_btyp_nm, ROUND(AVG(fd_yr1_ern_r), 2) AS avg_return_1y, COUNT(fd_yr1_ern_r) AS fund_count
+    FROM prfd01n001
+    WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모'
+      AND zrin_btyp_nm IS NOT NULL AND fd_yr1_ern_r IS NOT NULL
+    GROUP BY zrin_btyp_nm
+    ORDER BY avg_return_1y DESC
+  key_columns: [zrin_btyp_nm, avg_return_1y]
+  must_mention: [1년 수익률 결측 클래스 제외]
+
+- id: C2-03
+  category: C2
+  difficulty: easy
+  tables: [prbd01n001]
+  question: 채권을 회사채, 특수채, 국공채로 나눠서 각각 몇 종목인지 알려줘
+  interpretation: std_pd_mcls_nm별 채권 종목 수(DISTINCT pd_no).
+  policy_refs: [P-SCOPE, P-UNIT]
+  answer_type: table
+  gold_sql: |
+    SELECT std_pd_mcls_nm, COUNT(DISTINCT pd_no) AS bond_count
+    FROM prbd01n001
+    GROUP BY std_pd_mcls_nm
+    ORDER BY bond_count DESC
+  key_columns: [std_pd_mcls_nm, bond_count]
+  must_mention: [종목 기준 개수]
+
+- id: C2-04
+  category: C2
+  difficulty: medium
+  tables: [pref02n001]
+  question: 해외 ETF 평균 보수율은 얼마야?
+  interpretation: 해외 ETF 보수율 평균(소수 넷째 자리). 해외 ETF 보수 0은 실제 값으로 포함.
+  policy_refs: [P-PRODUCT, P-ZERO, P-UNITS]
+  answer_type: scalar
+  gold_sql: |
+    SELECT ROUND(AVG(cu_charge_rt), 4) AS avg_fee
+    FROM pref02n001
+    WHERE pd_grp_no = 'ETF'
+  key_columns: [avg_fee]
+  decision_needed:
+    question: 보수 0을 평균에 포함할까?
+    resolved: 0 포함
+    options:
+      - label: 0 제외
+        sql: SELECT ROUND(AVG(cu_charge_rt), 4) FROM pref02n001 WHERE pd_grp_no='ETF' AND cu_charge_rt > 0
+      - label: 0 포함 (gold)
+        sql: SELECT ROUND(AVG(cu_charge_rt), 4) FROM pref02n001 WHERE pd_grp_no='ETF'
+
+- id: C2-05
+  category: C2
+  difficulty: medium
+  tables: [prfd01n001]
+  question: 판매중인 공모 MMF 순자산 합계가 얼마야?
+  interpretation: 판매중·공모, 제로인 대유형 MMF 클래스의 순자산(fd_nast_suma) 합계(원).
+  policy_refs: [P-SALE, P-NULL, P-ASSET, P-UNITS]
+  answer_type: scalar
+  gold_sql: |
+    SELECT SUM(fd_nast_suma) AS total_net_assets
+    FROM prfd01n001
+    WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모' AND zrin_btyp_nm = 'MMF'
+  key_columns: [total_net_assets]
+  decision_needed:
+    question: MMF 구분을 제로인 대유형(zrin_btyp_nm)과 운용속성(or_attr_desc) 중 무엇으로 할까?
+    resolved: 제로인 대유형 MMF
+    options:
+      - label: 제로인 대유형 MMF (gold)
+        sql: SELECT SUM(fd_nast_suma) FROM prfd01n001 WHERE sale_yn='판매중' AND prvo_pbff_desc='공모' AND zrin_btyp_nm='MMF'
+      - label: 운용속성 MMF
+        sql: SELECT SUM(fd_nast_suma) FROM prfd01n001 WHERE sale_yn='판매중' AND prvo_pbff_desc='공모' AND or_attr_desc='MMF'
+  notes: 클래스별 순자산을 합산한다. 클래스 순자산이 모펀드 기준으로 중복 기록되는지는 미확인.
+
+- id: C2-06
+  category: C2
+  difficulty: hard
+  tables: [pref01n001]
+  question: 국내 ETN 중에 레버리지 상품 비중이 몇 %야?
+  interpretation: 국내 ETN 중 배수(cu_lev_fector) 1 초과 비율. 배수 정보가 없는 ETN은 분모에서 제외.
+  policy_refs: [P-PRODUCT, P-NULL]
+  answer_type: scalar
+  gold_sql: |
+    SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE cu_lev_fector::numeric > 1) / COUNT(cu_lev_fector), 1) AS leverage_pct
+    FROM pref01n001
+    WHERE pd_grp_no = 'ETN'
+  key_columns: [leverage_pct]
+  must_mention: [배수 정보 없는 ETN 제외]
+  decision_needed:
+    question: 배수 정보가 없는 ETN(123개)을 분모에 넣을까?
+    resolved: 분모에서 제외
+    options:
+      - label: 분모에서 제외 (gold)
+        sql: SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE cu_lev_fector::numeric > 1) / COUNT(cu_lev_fector), 1) FROM pref01n001 WHERE pd_grp_no='ETN'
+      - label: 전체 ETN을 분모로
+        sql: SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE cu_lev_fector::numeric > 1) / COUNT(*), 1) FROM pref01n001 WHERE pd_grp_no='ETN'
+
+- id: C2-07
+  category: C2
+  difficulty: medium
+  tables: [prbd01n001]
+  question: 국고채 평균 표면금리가 얼마야?
+  interpretation: 상품소분류 국고채인 채권을 종목 단위로 중복 제거한 뒤 표면이자율 평균(소수 셋째 자리).
+  policy_refs: [P-SCOPE, P-UNIT, P-UNITS]
+  answer_type: scalar
+  gold_sql: |
+    SELECT ROUND(AVG(srfc_irt)::numeric, 3) AS avg_coupon
+    FROM (SELECT DISTINCT pd_no, srfc_irt FROM prbd01n001 WHERE std_pd_scls_nm = '국고채') t
+  key_columns: [avg_coupon]
+  decision_needed:
+    question: 행 단위로 평균을 내면 장내·장외에 모두 있는 종목이 두 번 들어간다. 종목 기준으로 할까?
+    resolved: 종목 기준
+    options:
+      - label: 종목 기준 (gold)
+        sql: SELECT ROUND(AVG(srfc_irt)::numeric, 3) FROM (SELECT DISTINCT pd_no, srfc_irt FROM prbd01n001 WHERE std_pd_scls_nm='국고채') t
+      - label: 행 기준
+        sql: SELECT ROUND(AVG(srfc_irt)::numeric, 3) FROM prbd01n001 WHERE std_pd_scls_nm='국고채'
+
+# ───────────────────────── C3 순위 ─────────────────────────
+- id: C3-01
+  category: C3
+  difficulty: easy
+  tables: [pref01n001]
+  question: 국내 주식에 투자하는 ETF 중 1년 수익률 상위 5개 알려줘
+  interpretation: 투자지역 국내·자산군 주식인 국내 ETF를 1년 수익률 내림차순으로 5개. 1년 수익률 결측 제외.
+  policy_refs: [P-PRODUCT, P-NULL, P-TIE, P-ASSET]
+  answer_type: list
+  gold_sql: |
+    SELECT pd_abrv_nm, du_er_1y
+    FROM pref01n001
+    WHERE pd_grp_no = 'ETF' AND wu_inv_rgn = '국내' AND wu_inv_ast_type = '주식'
+      AND du_er_1y IS NOT NULL
+    ORDER BY du_er_1y DESC
+    LIMIT 5
+  key_columns: [pd_abrv_nm]
+  order_matters: true
+
+- id: C3-02
+  category: C3
+  difficulty: easy
+  tables: [pref02n001]
+  question: 해외 채권형 ETF 중에 규모(순자산)가 제일 큰 3개는?
+  interpretation: 해외 ETF 중 자산군 Bond를 일간 순자산총액(du_last_aum) 내림차순으로 3개.
+  policy_refs: [P-PRODUCT, P-NULL, P-TIE, P-ASSET]
+  answer_type: list
+  gold_sql: |
+    SELECT pd_abrv_nm, du_last_aum
+    FROM pref02n001
+    WHERE pd_grp_no = 'ETF' AND wu_inv_ast_type = 'Bond' AND du_last_aum IS NOT NULL
+    ORDER BY du_last_aum DESC
+    LIMIT 3
+  key_columns: [pd_abrv_nm]
+  order_matters: true
+
+- id: C3-03
+  category: C3
+  difficulty: hard
+  tables: [prbd01n001]
+  question: 지금 살 수 있는 채권 중에 개인 세후수익률이 제일 높은 3종목 알려줘
+  interpretation: 판매 물량이 있는 채권을 종목별 최대 세후수익률(after_tax_yield) 기준 내림차순으로 3종목.
+  policy_refs: [P-SALE, P-UNIT, P-TIE, P-UNITS]
+  answer_type: list
+  gold_sql: |
+    SELECT pd_no, MAX(pd_nm) AS pd_nm, MAX(after_tax_yield) AS after_tax_yield
+    FROM prbd01n001
+    WHERE trade_price IS NOT NULL AND after_tax_yield IS NOT NULL
+    GROUP BY pd_no
+    ORDER BY after_tax_yield DESC
+    LIMIT 3
+  key_columns: [pd_no]
+  order_matters: true
+  notes: 같은 종목의 LOT가 여러 개면 수익률이 다를 수 있어 종목별 최댓값을 쓴다.
+
+- id: C3-04
+  category: C3
+  difficulty: medium
+  tables: [prfd01n001]
+  question: 판매중인 공모 해외주식형 펀드 중 3년 수익률이 가장 높은 펀드는?
+  interpretation: 판매중·공모·제로인 대유형 해외주식형 클래스 중 3년 수익률 최고 1개.
+  policy_refs: [P-SALE, P-NULL, P-TIE, P-ASSET, P-OUTLIER]
+  answer_type: list
+  gold_sql: |
+    SELECT itm_nm, fd_yr3_ern_r
+    FROM prfd01n001
+    WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모' AND zrin_btyp_nm = '해외주식형'
+      AND fd_yr3_ern_r IS NOT NULL
+    ORDER BY fd_yr3_ern_r DESC
+    LIMIT 1
+  key_columns: [itm_nm]
+  order_matters: true
+  decision_needed:
+    question: 1위 클래스(마이다스아시아리더스 Ce)의 3년 수익률 2,193.76%는 다른 클래스·펀드 대비 비정상적으로 높다(2위 279.90%). 이상치로 보고 제외할까?
+    resolved: 원본 그대로
+    options:
+      - label: 원본 그대로 (gold)
+        sql: SELECT itm_nm, fd_yr3_ern_r FROM prfd01n001 WHERE sale_yn='판매중' AND prvo_pbff_desc='공모' AND zrin_btyp_nm='해외주식형' AND fd_yr3_ern_r IS NOT NULL ORDER BY fd_yr3_ern_r DESC LIMIT 1
+      - label: 3년 수익률 1000% 초과 이상치 제외
+        sql: SELECT itm_nm, fd_yr3_ern_r FROM prfd01n001 WHERE sale_yn='판매중' AND prvo_pbff_desc='공모' AND zrin_btyp_nm='해외주식형' AND fd_yr3_ern_r IS NOT NULL AND fd_yr3_ern_r <= 1000 ORDER BY fd_yr3_ern_r DESC LIMIT 1
+  notes: 같은 펀드의 클래스(A, C-e 등)가 수익률이 비슷해 상위권에 함께 나올 수 있다.
+
+- id: C3-05
+  category: C3
+  difficulty: medium
+  tables: [pref01n001]
+  question: 국내 ETF 중 총보수가 가장 낮은 3개는?
+  interpretation: 국내 ETF 총보수(text를 numeric으로 변환)가 0 초과인 상품을 오름차순 3개. 보수 정보는 ETF의 대부분이 결측.
+  policy_refs: [P-PRODUCT, P-NULL, P-ZERO, P-TIE]
+  answer_type: list
+  gold_sql: |
+    SELECT pd_abrv_nm, cu_charge_rt::numeric AS fee
+    FROM pref01n001
+    WHERE pd_grp_no = 'ETF' AND cu_charge_rt::numeric > 0
+    ORDER BY fee
+    LIMIT 3
+  key_columns: [pd_abrv_nm]
+  order_matters: true
+  must_mention: [보수 정보가 있는 일부 ETF만 대상]
+
+# ───────────────────────── C4 관계 탐색 ─────────────────────────
+- id: C4-01
+  category: C4
+  difficulty: hard
+  tables: [domestic_etf_holdings, pref01n001]
+  question: 에코프로비엠을 편입한 ETF 중에 순자산 큰 순서로 3개 알려줘
+  interpretation: 구성종목에 '에코프로비엠'이 있는 국내 ETF를 순자산총액(pd_net_tamt) 내림차순으로 3개.
+  policy_refs: [P-PRODUCT, P-NAME, P-NULL, P-TIE]
+  answer_type: list
+  gold_sql: |
+    SELECT p.pd_abrv_nm, p.pd_net_tamt
+    FROM pref01n001 p
+    WHERE p.pd_grp_no = 'ETF' AND p.pd_net_tamt IS NOT NULL
+      AND p.pd_itm_no IN (SELECT item_id FROM domestic_etf_holdings WHERE component_name = '에코프로비엠')
+    ORDER BY p.pd_net_tamt DESC
+    LIMIT 3
+  key_columns: [pd_abrv_nm]
+  order_matters: true
+  notes: 구성종목명은 정확 일치. 같은 종목이 코드 형식만 다르게 여러 번 등재되어 있어 ETF 기준 중복 제거가 필요하다.
+
+- id: C4-02
+  category: C4
+  difficulty: medium
+  tables: [domestic_etf_holdings, pref01n001]
+  question: KODEX 200 구성종목이 몇 개야?
+  interpretation: 상품약어명 'KODEX 200' ETF의 구성종목 수(현금성 항목 제외, 종목명 중복 제거).
+  policy_refs: [P-NAME, P-CASH]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(DISTINCT h.component_name) AS component_count
+    FROM domestic_etf_holdings h JOIN pref01n001 p ON p.pd_itm_no = h.item_id
+    WHERE p.pd_abrv_nm = 'KODEX 200'
+      AND h.component_name NOT IN ('원화예금', '설정현금액', '원화현금', '현금성자산', '100%현금설정액')
+  key_columns: [component_count]
+  decision_needed:
+    question: 현금성 항목도 구성종목으로 셀까?
+    resolved: 현금성 제외
+    options:
+      - label: 현금성 제외 (gold)
+        sql: SELECT COUNT(DISTINCT h.component_name) FROM domestic_etf_holdings h JOIN pref01n001 p ON p.pd_itm_no = h.item_id WHERE p.pd_abrv_nm='KODEX 200' AND h.component_name NOT IN ('원화예금','설정현금액','원화현금','현금성자산','100%현금설정액')
+      - label: 등재 행 전체
+        sql: SELECT COUNT(*) FROM domestic_etf_holdings h JOIN pref01n001 p ON p.pd_itm_no = h.item_id WHERE p.pd_abrv_nm='KODEX 200'
+
+- id: C4-03
+  category: C4
+  difficulty: medium
+  tables: [domestic_etf_holdings]
+  question: 삼성전자랑 SK하이닉스를 둘 다 담고 있는 ETF는 몇 개야?
+  interpretation: 구성종목에 '삼성전자'와 'SK하이닉스'가 모두 있는 국내 ETF 수.
+  policy_refs: [P-UNIT, P-NAME]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(*) AS etf_count
+    FROM (
+      SELECT item_id FROM domestic_etf_holdings
+      WHERE component_name IN ('삼성전자', 'SK하이닉스')
+      GROUP BY item_id
+      HAVING COUNT(DISTINCT component_name) = 2
+    ) t
+  key_columns: [etf_count]
+
+- id: C4-04
+  category: C4
+  difficulty: hard
+  tables: [prfd01n001]
+  question: 판매중인 공모펀드를 클래스 말고 대표펀드 기준으로 세면 몇 개야?
+  interpretation: 판매중·공모 클래스를 대표예탁원종목번호(rptt_ksd_itm_no)로 묶어 대표펀드 수를 센다. 대표번호 결측 클래스는 제외.
+  policy_refs: [P-SALE, P-UNIT, P-NULL]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(DISTINCT rptt_ksd_itm_no) AS fund_count
+    FROM prfd01n001
+    WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모' AND rptt_ksd_itm_no IS NOT NULL
+  key_columns: [fund_count]
+  must_mention: [대표번호 없는 클래스 제외]
+
+- id: C4-05
+  category: C4
+  difficulty: medium
+  tables: [prbd01n001]
+  question: 한국전력공사가 발행한 채권을 신용등급별로 몇 종목인지 정리해줘
+  interpretation: 발행기관 '한국전력공사(주)' 채권을 신용등급별 종목 수로 집계(등급 없음 포함).
+  policy_refs: [P-SCOPE, P-UNIT, P-NAME]
+  answer_type: table
+  gold_sql: |
+    SELECT crd_grd, COUNT(DISTINCT pd_no) AS bond_count
+    FROM prbd01n001
+    WHERE pd_pbcm = '한국전력공사(주)'
+    GROUP BY crd_grd
+    ORDER BY bond_count DESC
+  key_columns: [crd_grd, bond_count]
+  notes: 발행기관명 원문은 '한국전력공사(주)'. 질문의 '한국전력공사'와 매칭해야 한다.
+
+- id: C4-06
+  category: C4
+  difficulty: hard
+  tables: [pref01n001, pref02n001]
+  question: S&P 500 TR 지수를 벤치마크로 하는 ETF가 국내랑 해외에 각각 몇 개 있어?
+  interpretation: 국내는 Refinitiv 벤치마크(ref_base_index), 해외는 기초지수(cu_base_index)가 'S&P 500 TR'인 ETF 수.
+  policy_refs: [P-PRODUCT, P-NAME, P-NULL]
+  answer_type: table
+  gold_sql: |
+    SELECT 'domestic' AS market, COUNT(*) AS etf_count FROM pref01n001
+    WHERE pd_grp_no = 'ETF' AND ref_base_index = 'S&P 500 TR'
+    UNION ALL
+    SELECT 'overseas', COUNT(*) FROM pref02n001
+    WHERE pd_grp_no = 'ETF' AND cu_base_index = 'S&P 500 TR'
+  key_columns: [market, etf_count]
+  must_mention: [국내 ETF 벤치마크 정보는 일부 결측]
+  notes: 국내 ETF의 ref_base_index는 32% 결측이고, 국내 기초지수(cu_base_index)는 97% 결측이라 Refinitiv 벤치마크를 쓴다.
+
+# ───────────────────────── C5 비교 ─────────────────────────
+- id: C5-01
+  category: C5
+  difficulty: hard
+  tables: [pref01n001, pref02n001]
+  question: 국내 ETF랑 해외 ETF 평균 보수율 비교해줘
+  interpretation: 국내·해외 ETF 각각의 보수율 평균과 계산에 쓴 상품 수. 국내 ETF는 결측과 '0'(미입력)을 제외하고, 해외 ETF는 0을 포함한다.
+  policy_refs: [P-PRODUCT, P-NULL, P-ZERO, P-UNITS]
+  answer_type: table
+  gold_sql: |
+    SELECT 'domestic' AS market, ROUND(AVG(cu_charge_rt::numeric), 4) AS avg_fee, COUNT(*) AS etf_count
+    FROM pref01n001 WHERE pd_grp_no = 'ETF' AND cu_charge_rt::numeric > 0
+    UNION ALL
+    SELECT 'overseas', ROUND(AVG(cu_charge_rt), 4), COUNT(*)
+    FROM pref02n001 WHERE pd_grp_no = 'ETF' AND cu_charge_rt IS NOT NULL
+  key_columns: [market, avg_fee]
+  must_mention: [국내 ETF는 보수 정보가 있는 일부만 비교]
+
+- id: C5-02
+  category: C5
+  difficulty: medium
+  tables: [prfd01n001]
+  question: 판매중인 공모펀드에서 국내주식형이랑 해외주식형 중 평균 1년 수익률이 어디가 더 높아?
+  interpretation: 판매중·공모 클래스 중 제로인 대유형 '주식형'과 '해외주식형'의 1년 수익률 평균 비교.
+  policy_refs: [P-SALE, P-NULL, P-ASSET]
+  answer_type: table
+  gold_sql: |
+    SELECT zrin_btyp_nm, ROUND(AVG(fd_yr1_ern_r), 2) AS avg_return_1y, COUNT(fd_yr1_ern_r) AS fund_count
+    FROM prfd01n001
+    WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모'
+      AND zrin_btyp_nm IN ('주식형', '해외주식형') AND fd_yr1_ern_r IS NOT NULL
+    GROUP BY zrin_btyp_nm
+    ORDER BY avg_return_1y DESC
+  key_columns: [zrin_btyp_nm, avg_return_1y]
+  notes: 제로인 대유형에서 '주식형'이 국내주식형에 해당한다.
+
+# ───────────────────────── C6 범위 밖 ─────────────────────────
+- id: C6-01
+  category: C6
+  difficulty: medium
+  tables: [domestic_etf_holdings]
+  question: 에코프로의 자회사를 편입한 ETF 알려줘
+  interpretation: 기업 지배구조(자회사) 정보가 5개 테이블에 없으므로 근거 없음을 밝혀야 한다. 사용자가 자회사명을 알려주면 조회할 수 있다고 안내하면 좋다.
+  policy_refs: [P-OOS]
+  answer_type: refusal
+  must_mention: [자회사 관계 데이터 없음]
+  notes: LLM이 기억하는 자회사 목록(에코프로비엠 등)으로 조회해 답하면 근거 없는 답으로 오답 처리한다.
+
+- id: C6-02
+  category: C6
+  difficulty: easy
+  tables: [domestic_etf_holdings, pref01n001]
+  question: KODEX 200에서 삼성전자 비중이 몇 %야?
+  interpretation: 구성종목 테이블에 편입 비중·수량 컬럼이 없어 답할 수 없다. 편입 여부만 확인 가능함을 안내.
+  policy_refs: [P-OOS]
+  answer_type: refusal
+  must_mention: [편입 비중 데이터 없음]
+
+- id: C6-03
+  category: C6
+  difficulty: easy
+  tables: [pref01n001]
+  question: 다음 달에 수익률 제일 좋을 것 같은 국내 ETF 하나만 찍어줘
+  interpretation: 미래 수익률 예측과 투자 추천은 데이터 근거가 없고 범위 밖이다. 과거 수익률 조회는 가능함을 안내.
+  policy_refs: [P-OOS]
+  answer_type: refusal
+  must_mention: [예측·추천 불가]
