@@ -34,7 +34,8 @@ START → select_tables → generate_query ─┬─(도구 호출 없음)→ EN
 |---|---|
 | `src/portfolio_agent/graph.py` | LangGraph 그래프 |
 | `src/portfolio_agent/prompts.py` | 노드별 프롬프트 |
-| `src/portfolio_agent/domain_rules.md` | 테이블별 도메인 규칙 (판매중 필터, 결측 해석, 신용등급 순서 등) |
+| `src/portfolio_agent/domain_rules.md` | 테이블별 도메인 규칙. 2026-10-17에 비우고, 골든 데이터셋 실패를 근거로 하나씩 다시 쌓는 중 |
+| `src/portfolio_agent/domain_rules_legacy.md` | 이전 도메인 규칙 보관본 (에이전트는 읽지 않음) |
 | `src/portfolio_agent/schema_catalog.py` | 컬럼 설명·결측률·값 분포를 담은 스키마 카드 (`data/schema_catalog.json` 캐시) |
 | `src/portfolio_agent/sql_guard.py` | SQL 안전 검사 |
 

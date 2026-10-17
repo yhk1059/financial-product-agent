@@ -4,14 +4,21 @@ from pathlib import Path
 
 from .config import ALLOWED_TABLES, settings
 
+RULES_PATH = Path(__file__).parent / "domain_rules.md"
+NO_RULES = "(없음)"
+
+
 def _load_rule_sections() -> dict[str, str]:
-    """domain_rules.md를 '## ' 섹션별로 나눈다. 키는 섹션 제목의 첫 단어(테이블명 또는 '공통')."""
-    text = (Path(__file__).parent / "domain_rules.md").read_text()
+    """domain_rules.md를 '## ' 섹션별로 나눈다. 키는 섹션 제목의 첫 단어(테이블명 또는 '공통').
+
+    첫 '## ' 앞의 머리말과 규칙 항목이 없는 빈 섹션은 버린다. 파일이 없으면 규칙 없음으로 본다.
+    """
+    text = RULES_PATH.read_text() if RULES_PATH.exists() else ""
     sections = {}
-    for chunk in text.split("\n## "):
-        chunk = chunk.removeprefix("## ").strip()
-        if chunk:
-            sections[chunk.split()[0]] = "## " + chunk
+    for chunk in ("\n" + text).split("\n## ")[1:]:
+        title, _, body = chunk.partition("\n")
+        if title.strip() and body.strip():
+            sections[title.split()[0]] = f"## {title.strip()}\n{body.strip()}"
     return sections
 
 
@@ -19,9 +26,9 @@ RULE_SECTIONS = _load_rule_sections()
 
 
 def rules_for(tables: list[str]) -> str:
-    """공통 규칙 + 선택된 테이블의 규칙만 반환 (프롬프트 토큰 절약)."""
+    """공통 규칙 + 선택된 테이블의 규칙만 반환 (프롬프트 토큰 절약). 해당 규칙이 없으면 '(없음)'."""
     keys = ["공통", *tables]
-    return "\n\n".join(RULE_SECTIONS[k] for k in keys if k in RULE_SECTIONS)
+    return "\n\n".join(RULE_SECTIONS[k] for k in keys if k in RULE_SECTIONS) or NO_RULES
 
 SELECT_TABLES = """당신은 금융상품 데이터베이스의 테이블 라우터입니다.
 사용자의 최신 질문(필요하면 앞선 대화 맥락 포함)에 답하려면 어떤 테이블이 필요한지 고르세요.
@@ -47,7 +54,7 @@ GENERATE_QUERY = """당신은 금융상품 데이터를 PostgreSQL로 조회해 
 - PostgreSQL 문법, 단일 SELECT 문만 사용합니다(INSERT/UPDATE/DELETE/DDL 금지).
 - 아래 스키마에 있는 테이블과 컬럼만 사용합니다. 컬럼명을 지어내지 않습니다.
 - 필요한 컬럼만 SELECT 하고, 사용자가 개수를 정하지 않으면 LIMIT {top_k} 이하로 조회합니다.
-- 질문에 나온 조건은 하나도 빠짐없이 WHERE에 넣습니다. 특히 'ETF'/'ETN'이라고 하면 pd_grp_no = 'ETF' 또는 'ETN' 조건을 꼭 넣습니다(ETF와 ETN이 한 테이블에 섞여 있음).
+- 질문에 나온 조건은 하나도 빠짐없이 WHERE에 넣습니다.
 - "몇 개"를 물으면 COUNT로 전체 개수를 구합니다. 묻지 않은 GROUP BY 분해는 하지 않습니다.
 - 상품 목록을 보여줄 때는 상품명과 상품번호(코드)를 함께 조회합니다.
 - 집계 질문은 GROUP BY / COUNT / AVG 등으로 DB에서 계산합니다. 직접 세거나 계산하지 않습니다.
@@ -78,7 +85,7 @@ CHECK_QUERY = """당신은 꼼꼼한 PostgreSQL 전문가입니다. 아래 SQL�
 - text 타입 컬럼을 숫자로 비교할 때 ::numeric 변환 여부
 - NULL이 많은 컬럼으로 정렬할 때 NULLS LAST 또는 IS NOT NULL 사용 여부
 - NOT IN 과 NULL, UNION 과 UNION ALL, BETWEEN 경계, 조인 조건, GROUP BY 누락
-- 도메인 규칙 위반 (판매중 필터, 신용등급 비교 방식, 중복 행 COUNT(DISTINCT) 등)
+- 아래 도메인 규칙 위반 여부
 - 질문의 의도와 쿼리가 맞는지
 
 문제가 있으면 고친 SQL을, 없으면 원래 SQL을 그대로 query 필드에 넣으세요.
