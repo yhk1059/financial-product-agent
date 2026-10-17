@@ -1,6 +1,6 @@
 """골든 데이터셋 정답 SQL을 실행·검사하고 정답 스냅샷과 검토표를 만든다.
 
-uv run python scripts/verify_golden.py [--version v1]
+uv run python scripts/verify_golden.py [--version v2]
 
 출력:
 - golden/gold_results_{version}.json : 문항별 정답 결과 스냅샷, 선택지별 결과, 경고
@@ -75,9 +75,10 @@ def verify(q: dict) -> dict:
     cols, rows = run(sql)
     out["columns"], out["rows"], out["row_count"] = cols, rows, len(rows)
 
-    missing = [k for k in q.get("key_columns", []) if k not in cols]
+    alts = [a for v in q.get("key_alternatives", {}).values() for a in v]
+    missing = [k for k in [*q.get("key_columns", []), *alts] if k not in cols]
     if missing:
-        out["warnings"].append(f"key_columns가 결과에 없음: {missing}")
+        out["warnings"].append(f"key_columns·key_alternatives가 결과에 없음: {missing}")
     if not rows:
         out["warnings"].append("결과 0건")
     if q["answer_type"] in ("count", "scalar") and len(rows) != 1:
@@ -161,7 +162,7 @@ def write_review_sheet(questions: list[dict], results: dict[str, dict], version:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--version", default="v1")
+    parser.add_argument("--version", default="v2")
     args = parser.parse_args()
 
     questions = yaml.safe_load((GOLDEN_DIR / f"questions_{args.version}.yaml").read_text())

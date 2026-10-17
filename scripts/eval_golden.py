@@ -1,7 +1,8 @@
 """골든 데이터셋으로 에이전트를 실행·채점한다 (golden/design.md 5절).
 
 uv run python scripts/eval_golden.py --label base [--check] [--runs 3] [--only C1-01,C4-06]
-uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write]   # DB·LLM 없이 재채점
+uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]
+    # DB·LLM 없이 현재 골든 버전으로 재채점. --label을 주면 그 이름의 새 파일(_r1.jsonl, _summary.md)로 저장
 uv run python scripts/eval_golden.py --compare base check                                 # 구성별 문항 비교표
 
 출력: data/golden_runs/{label}_r{i}.jsonl (문항별 실행 기록·채점), {label}_summary.md (요약)
@@ -24,7 +25,7 @@ from portfolio_agent.config import PROJECT_ROOT, settings
 from portfolio_agent.golden_eval import grade, sql_sha, to_json
 from portfolio_agent.sql_guard import SQLGuardError, validate
 
-VERSION = "v1"
+VERSION = "v2"
 GOLDEN_DIR = PROJECT_ROOT / "golden"
 RUNS_DIR = PROJECT_ROOT / "data" / "golden_runs"
 CATEGORIES = ["C1", "C2", "C3", "C4", "C5", "C6"]
@@ -131,13 +132,18 @@ def rescore(args) -> None:
     qmap = {q["id"]: q for q in questions}
     path = Path(args.rescore)
     rows = read_jsonl(path)
+    if args.label:  # 원본은 그대로 두고 새 이름으로 저장 (예: v1 기준선을 v2 기준으로 재채점)
+        path = path.with_name(path.name.replace(f"{rows[0]['label']}_", f"{args.label}_", 1))
+        for r in rows:
+            r["label"] = args.label
     changed = []
     for r in rows:
         before = r.get("correct")
+        r["golden_version"] = VERSION
         r.update(grade(qmap[r["id"]], gold.get(r["id"]), r))
         if before != r["correct"]:
             changed.append(f"{r['id']}:{'X→O' if r['correct'] else 'O→X'}")
-    if args.write:
+    if args.write or args.label:
         path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
         print(f"파일 갱신: {path}")
         write_summary(rows[0]["label"], rows, [qmap[r["id"]] for r in rows])
@@ -172,8 +178,8 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
         "## 축별",
         "| 축 | 결과 | 비고 |",
         "|---|---|---|",
-        f"| 실행 정확도 (C1~C5) | {_rate(sum(r['exec_match'] in ('last', 'union') for r in sql_rows), len(sql_rows))} "
-        f"| union {sum(r['exec_match'] == 'union' for r in sql_rows)}건, "
+        f"| 실행 정확도 (C1~C5) | {_rate(sum(r['exec_match'] in ('last', 'earlier', 'union') for r in sql_rows), len(sql_rows))} "
+        f"| earlier {sum(r['exec_match'] == 'earlier' for r in sql_rows)}건, union {sum(r['exec_match'] == 'union' for r in sql_rows)}건, "
         f"비율 변형 {sum(bool(r.get('scale_variant')) for r in sql_rows)}건 |",
         f"| 답변 정확도 | {_rate(sum(r['answer_ok'] for r in judged), len(judged))} | 키 값 10개 초과 문항 제외 |",
         f"| 필수 언급 | {_rate(sum(not r['mentions_missing'] for r in with_mention), len(with_mention))} | |",
@@ -274,7 +280,7 @@ def compare(labels: list[str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="골든 데이터셋 채점")
-    parser.add_argument("--label", default="base", help="구성 이름 (결과 파일 접두어)")
+    parser.add_argument("--label", help="구성 이름 (결과 파일 접두어, 기본 base). --rescore와 쓰면 새 이름으로 저장")
     parser.add_argument("--check", action="store_true", help="check_query 노드 사용")
     parser.add_argument("--runs", type=int, default=1, help="같은 구성 반복 횟수 (일관성 측정)")
     parser.add_argument("--only", help="쉼표로 구분한 문항 ID")
@@ -287,6 +293,7 @@ def main() -> None:
     elif args.compare:
         compare(args.compare)
     else:
+        args.label = args.label or "base"
         run(args)
 
 

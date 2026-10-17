@@ -174,20 +174,33 @@ def _table_eq(agent_rows: list[tuple], gold_rows: list[tuple], labels: list[int]
 _MATCHERS = {"count": _match_scalar, "scalar": _match_scalar, "list": _match_list, "table": _match_table}
 
 
+def _key_variants(q: dict) -> list[list[str]]:
+    """key_columns와, key_alternatives(같은 상품을 가리키는 다른 식별 컬럼)로 바꾼 조합들 (S4)."""
+    alts = q.get("key_alternatives", {})
+    return [list(c) for c in itertools.product(*([k, *alts.get(k, [])] for k in q["key_columns"]))]
+
+
 def match_result(q: dict, gold: dict, cols: list[str], rows: list[list]) -> dict | None:
-    """에이전트 결과 하나가 정답과 맞으면 대응 정보(dict), 아니면 None."""
-    return _MATCHERS[q["answer_type"]](q, gold, cols, rows)
+    """에이전트 결과 하나가 정답과 맞으면 대응 정보(dict), 아니면 None.
+
+    키 컬럼마다 대체 식별 컬럼(key_alternatives) 중 어느 것으로 대응해도 맞은 것으로 본다.
+    """
+    for keys in _key_variants(q):
+        info = _MATCHERS[q["answer_type"]]({**q, "key_columns": keys}, gold, cols, rows)
+        if info is not None:
+            return info
+    return None
 
 
 def exec_match(q: dict, gold: dict, queries: list[dict]) -> tuple[str, dict]:
-    """5.4: 마지막 성공 쿼리 → (table 문항만) 성공 쿼리 전체 합집합 순으로 비교한다."""
+    """5.4: 마지막 성공 쿼리 → 앞선 성공 쿼리(S2) → (table 문항만) 성공 쿼리 합집합 순으로 비교한다."""
     done = [x for x in queries if x.get("ok") and "rerun_rows" in x]
     if not done:
         return "no_query", {}
-    last = done[-1]
-    info = match_result(q, gold, last["rerun_columns"], last["rerun_rows"])
-    if info is not None:
-        return "last", info
+    for status, x in [("last", done[-1]), *(("earlier", y) for y in reversed(done[:-1]))]:
+        info = match_result(q, gold, x["rerun_columns"], x["rerun_rows"])
+        if info is not None:
+            return status, info
     if q["answer_type"] == "table" and len(done) > 1 and _union_covers(q, gold, done):
         return "union", {}
     return "none", {}
@@ -245,20 +258,28 @@ def _variants(v) -> list[str]:
     return out
 
 
-def answer_values(q: dict, gold: dict) -> list:
-    """답변에 나와야 할 정답 값. 라벨 컬럼은 정답 SQL이 지어낸 값이라 뺀다."""
-    keep = [i for i, k in enumerate(q["key_columns"]) if k not in q.get("label_columns", [])]
-    values = [r[i] for r in _key_rows(q, gold) for i in keep]
-    return values if len(values) <= MAX_ANSWER_VALUES else []
+def answer_values(q: dict, gold: dict) -> list[list]:
+    """답변에 나와야 할 정답 값. 값마다 [정답 값, 대체 식별 값…] 묶음이고 하나만 나와도 된다.
+
+    라벨 컬럼은 정답 SQL이 지어낸 값이라 뺀다.
+    """
+    cols, alts = gold["columns"], q.get("key_alternatives", {})
+    groups = [
+        [r[cols.index(c)] for c in [k, *alts.get(k, [])]]
+        for r in gold["rows"]
+        for k in q["key_columns"]
+        if k not in q.get("label_columns", [])
+    ]
+    return groups if len(groups) <= MAX_ANSWER_VALUES else []
 
 
 def check_answer(q: dict, gold: dict, answer: str) -> tuple[bool | None, list]:
-    """5.5 answer_ok. 판정 대상 값이 없으면 (None, [])."""
-    values = answer_values(q, gold)
-    if not values:
+    """5.5 answer_ok. 판정 대상 값이 없으면 (None, []). 빠진 값은 대표 값(정답 키 컬럼)으로 보고한다."""
+    groups = answer_values(q, gold)
+    if not groups:
         return None, []
     text = _norm(answer)
-    missing = [v for v in values if not any(_norm(c) in text for c in _variants(v))]
+    missing = [g[0] for g in groups if not any(_norm(c) in text for v in g for c in _variants(v))]
     return not missing, missing
 
 
@@ -338,6 +359,11 @@ def column_diff(q: dict, queries: list[dict]) -> tuple[list[str] | None, list[st
     gold, agent = sql_columns(q["gold_sql"]), sql_columns(done[-1]["sql"])
     if gold is None or agent is None:
         return None, None
+    # 대체 식별 컬럼(key_alternatives)끼리는 하나만 써도 빠진 것으로 보지 않는다 (S4)
+    for key, alts in q.get("key_alternatives", {}).items():
+        group = {key, *alts}
+        if agent & group:
+            gold, agent = gold - group, agent - group
     return sorted(gold - agent), sorted(agent - gold)
 
 
@@ -365,7 +391,7 @@ def grade(q: dict, gold: dict | None, record: dict) -> dict:
         out["answer_missing"] = [str(v) for v in missing]
         out["correct"] = (
             not record.get("error")
-            and out["exec_match"] in ("last", "union")
+            and out["exec_match"] in ("last", "earlier", "union")
             and out["answer_ok"] is not False
             and not out["mentions_missing"]
         )

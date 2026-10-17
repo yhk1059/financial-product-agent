@@ -21,9 +21,9 @@ uv run pytest tests/test_sql_guard.py                    # pure unit tests, no D
 uv run pytest -m "not db"                                # skip tests that need PostgreSQL
 uv run pytest tests/test_sql_guard.py::test_allows_select
 uv run python scripts/build_schema_cache.py              # regenerate data/schema_catalog.json after DB data changes
-uv run python scripts/verify_golden.py                   # rerun gold SQL → golden/gold_results_v1.json, review_sheet.md
-uv run python scripts/eval_golden.py --label base [--check] [--runs 3] [--only C1-01,C4-06]   # score agent on golden v1
-uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write]       # rescore without DB/LLM
+uv run python scripts/verify_golden.py                   # rerun gold SQL → golden/gold_results_v2.json, review_sheet.md
+uv run python scripts/eval_golden.py --label base [--check] [--runs 3] [--only C1-01,C4-06]   # score agent on golden v2
+uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]   # rescore without DB/LLM against the current golden version
 uv run python scripts/eval_golden.py --compare base check                                    # per-question table across labels
 ```
 
@@ -60,12 +60,12 @@ These drive most design choices. Don't "simplify" them back to the standard Lang
 
 ## Evaluation
 
-The golden dataset lives in `golden/`. `design.md` is the source of truth for interpretation policies (P-*), item format (§4), scoring (§5), and the decision log (§8). `questions_v1.yaml` holds 30 items (C1–C6) with `gold_sql`. `verify_golden.py` writes `gold_results_v1.json`, including a per-item `sql_sha`. `eval_golden.py` refuses to run if any hash is stale, so rerun `verify_golden.py` after editing `gold_sql`.
+The golden dataset lives in `golden/`. `design.md` is the source of truth for interpretation policies (P-*), item format (§4), scoring (§5), and the decision log (§8). `questions_v2.yaml` (current; v1 kept for history) holds 30 items (C1–C6) with `gold_sql`. `verify_golden.py` writes `gold_results_v2.json`, including a per-item `sql_sha`. The `VERSION` constant in `eval_golden.py` and `--version` default in `verify_golden.py` select the version. `eval_golden.py` refuses to run if any hash is stale, so rerun `verify_golden.py` after editing `gold_sql`.
 
 Scoring (`src/portfolio_agent/golden_eval.py`, pure functions, unit-tested in `tests/test_golden_eval.py`) is rule-based, with no LLM:
-- **Execution accuracy:** the last successful agent SQL is re-run (untruncated, guard LIMIT 200) and compared to gold by value, not by column name. Types: `count`/`scalar` mean one row containing the value, `list` is a set or ordered top-N, `table` is a multiset of key tuples. `label_columns` (literals invented by gold SQL, e.g. C5-01 `market`) match by one-to-one correspondence. For `table`, results split across several queries count as `exec_match: union`.
+- **Execution accuracy:** successful agent SQL is re-run (untruncated, guard LIMIT 200) and compared to gold by value, not by column name. Types: `count`/`scalar` mean one row containing the value, `list` is a set or ordered top-N, `table` is a multiset of key tuples. `label_columns` (literals invented by gold SQL, e.g. C5-01 `market`) match by one-to-one correspondence. The last successful query is tried first, then earlier ones (`exec_match: earlier`). For `table`, results split across several queries count as `union`. `key_alternatives` (e.g. `pd_abrv_nm` → `pd_nm`, `pd_itm_no`) let the same product match via another identifier column, in both execution and answer checks.
 - **Numbers:** equal if they match when rounded to 2 dp, or when rounded to the agent's own decimal places. Integers must match exactly. `scalar` also accepts ×100/÷100 (`scale_variant`).
-- **Answer text:** `answer_ok` means gold key values (≤10) appear in the answer. `mention_keywords` (`'a|b'` synonyms, aligned with `must_mention`) and C6 `forbidden_patterns` (regex) are also checked. `ungrounded_numbers` is reference-only. So are `columns_missing`/`columns_extra`: real schema columns (aliases dropped via `schema_catalog.json`) referenced by gold SQL vs the agent's last successful SQL, used to diagnose `wrong_result`.
+- **Answer text:** `answer_ok` means gold key values (≤10) appear in the answer. `mention_keywords` (`'a|b'` synonyms, aligned with `must_mention`) and C6 `forbidden_patterns` (regex) are also checked. Mention keywords must not appear in the question itself (schema test), and C6 requires an item-specific refusal reason, not just a generic "can't find". `ungrounded_numbers` is reference-only. So are `columns_missing`/`columns_extra`: real schema columns (aliases dropped via `schema_catalog.json`) referenced by gold SQL vs the agent's last successful SQL, used to diagnose `wrong_result`.
 - **`correct`:** C1–C5 require exec match, `answer_ok` not false, and all mentions. C6 requires refusal keywords and no forbidden hits. Failures get one `fail_reason`.
 
 Outputs go to `data/golden_runs/` (gitignored). When changing prompts or `domain_rules.md`, rerun the eval (or `--only` the affected ids). After changing scoring rules, use `--rescore` instead of rerunning the agent.
