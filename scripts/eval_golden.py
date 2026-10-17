@@ -208,7 +208,8 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
     by_id: dict[str, list[dict]] = defaultdict(list)
     for r in rows:
         by_id[r["id"]].append(r)
-    lines += ["", "## 문항별", "| ID | 정답 | 실행 | 답변 | 언급 누락 | 실패 원인 | 근거 없는 숫자 |", "|---|---|---|---|---|---|---|"]
+    lines += ["", "## 문항별", "| ID | 정답 | 실행 | 답변 | 언급 누락 | 실패 원인 | 빠진 컬럼 | 추가 컬럼 | 근거 없는 숫자 |",
+              "|---|---|---|---|---|---|---|---|---|"]
     for qid, rs in by_id.items():
         hits = sum(r["correct"] for r in rs)
         last = rs[-1]
@@ -221,6 +222,8 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
             answer,
             ", ".join(last["mentions_missing"]) or "-",
             ", ".join(sorted({r["fail_reason"] for r in rs if r["fail_reason"]})) or "-",
+            ", ".join(last.get("columns_missing") or []) or "-",
+            ", ".join(last.get("columns_extra") or []) or "-",
             ", ".join(f"{n:g}" for n in last["ungrounded_numbers"][:5]) or "-",
         ]
         lines.append("| " + " | ".join(c.replace("|", "\\|") for c in cells) + " |")

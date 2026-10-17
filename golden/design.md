@@ -130,6 +130,8 @@
 - **답변 정확도 (`answer_ok`, C1~C5):** 정답의 핵심 값이 답변 텍스트에 있는지 봅니다. 대상은 `count`·`scalar`의 값, `list`·`table`의 키 값(10개 이하일 때)입니다. 매칭은 숫자 변형(이전 `run_eval.py`의 `_variants`를 `golden_eval.py`로 옮김)(콤마, 반올림, `:.1f`·`:.2f`)을 쓰고 공백은 무시합니다. 금액은 억원·조원 환산도 허용합니다(P-UNITS). 값이 10개를 넘는 목록은 이 축에서 제외합니다(`answer_ok: null`).
 - **답변 충실도 (`grounded`, 전체):** 답변에서 숫자를 모두 뽑아 각각 성공한 쿼리의 `output`에 있는지 봅니다. 연도·날짜·기준일(2026, 08, 21), 질문에 나온 숫자, 순위 번호(1~N)는 제외합니다. 근거 없는 숫자는 `ungrounded_numbers`로 기록합니다. 이 축은 오탐이 있을 수 있어 처음에는 **정답 판정에 넣지 않고 참고 지표로만** 씁니다.
 
+- **컬럼 진단 (`columns_missing`·`columns_extra`, C1~C5):** 정답 SQL과 에이전트의 마지막 성공 쿼리를 sqlglot으로 파싱해, 참조한 컬럼 이름을 비교합니다. 스키마 카드(`data/schema_catalog.json`)에 있는 실제 컬럼만 남기므로 별칭·CTE 컬럼은 빠집니다. 테이블 구분 없이 컬럼 이름만 비교합니다. 정렬·출력용 컬럼도 섞이고 같은 답을 다른 컬럼으로 낼 수 있으므로, **정답 판정에는 쓰지 않고** `wrong_result`의 원인을 좁히는 진단으로만 씁니다. 핵심 컬럼을 문항에 직접 적는 방식(`required_columns`)은 기준선에서 컬럼 실수가 반복되는 문항에만 나중에 검토합니다.
+
 ### 5.6 필수 언급과 거절
 - 현재 `must_mention`은 "판매 건 기준 개수" 같은 설명문이라 키워드로 판정할 수 없습니다. 그래서 문항에 **`mention_keywords`** 필드를 추가합니다. `must_mention`과 같은 순서의 목록이고, 항목마다 `'표현1|표현2'`처럼 동의 표현을 나열합니다. 하나라도 있으면 그 항목을 충족합니다.
 
@@ -170,7 +172,7 @@ uv run python scripts/eval_golden.py --label base [--check] [--runs 3] [--only C
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl   # DB·LLM 없이 재채점
 uv run python scripts/eval_golden.py --compare base check                       # 구성별 문항 비교표
 ```
-- **JSONL 한 줄:** `id`, `category`, `difficulty`, `label`, `run`, `model`(`CLOVASTUDIO_MODEL`), `git_rev`, `golden_version`, `AskTrace` 필드, `agent_columns`·`agent_rows`(재실행 결과), 채점 결과(`exec_match`, `answer_ok`, `mentions_missing`, `forbidden_hits`, `ungrounded_numbers`, `correct`, `fail_reason`)
+- **JSONL 한 줄:** `id`, `category`, `difficulty`, `label`, `run`, `model`(`CLOVASTUDIO_MODEL`), `git_rev`, `golden_version`, `AskTrace` 필드, `agent_columns`·`agent_rows`(재실행 결과), 채점 결과(`exec_match`, `answer_ok`, `mentions_missing`, `forbidden_hits`, `ungrounded_numbers`, `columns_missing`, `columns_extra`, `correct`, `fail_reason`)
 - **요약 (`data/golden_runs/{label}_summary.md`):** 전체 정답률, 축별 정답률, 분류(C1~C6)·난이도별 정답률, 실패 원인 분포, 비용 합계
 - `gold_results_v1.json`에 문항이 없거나, 문항의 `sql_sha`(정답 SQL 해시, `verify_golden.py`가 기록)가 현재 `gold_sql`과 다르면 실행 전에 중단하고 `verify_golden.py` 실행을 안내합니다.
 

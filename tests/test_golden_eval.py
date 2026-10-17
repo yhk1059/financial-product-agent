@@ -198,3 +198,21 @@ def test_grade_refusal():
     assert grade(q, None, record("자회사 관계 정보는 데이터에 없습니다."))["correct"]
     guess = grade(q, None, record("자회사 정보는 데이터에 없지만 에코프로비엠을 담은 ETF는 3개입니다."))
     assert guess["fail_reason"] == "refusal_fail"
+
+
+# ───────────── 컬럼 진단 ─────────────
+def test_sql_columns_drops_aliases_and_ctes():
+    from portfolio_agent.golden_eval import sql_columns
+
+    assert sql_columns(QUESTIONS["C1-01"]["gold_sql"]) == {"curr_cd", "trade_price", "crd_grd"}
+    assert "n" not in sql_columns(QUESTIONS["C4-06"]["gold_sql"])  # CTE 컬럼 별칭
+    assert sql_columns("SELECT (") is None
+
+
+def test_column_diff_in_grade():
+    q, g = QUESTIONS["C1-01"], GOLD["C1-01"]
+    agent_sql = "SELECT COUNT(*) FROM prbd01n001 WHERE pd_exg_mkt IN ('장내','장외') AND curr_cd='KRW' AND crd_grd >= 'AA-'"
+    r = grade(q, g, record("13,779건", {**query(["count"], [[13779]]), "sql": agent_sql}))
+    assert r["columns_missing"] == ["trade_price"] and r["columns_extra"] == ["pd_exg_mkt"]
+    refusal = grade(QUESTIONS["C6-01"], None, record("데이터에 없습니다"))
+    assert refusal["columns_missing"] is None

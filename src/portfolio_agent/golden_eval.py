@@ -12,6 +12,10 @@ import hashlib
 import itertools
 import re
 from datetime import date, datetime
+from functools import lru_cache
+
+import sqlglot
+from sqlglot import exp
 
 DATA_DATE_PARTS = {2026.0, 8.0, 21.0}  # 데이터 기준일 2026-08-21 (P-DATE)
 MAX_ANSWER_VALUES = 10  # 이보다 키 값이 많은 목록은 answer_ok를 판정하지 않는다
@@ -303,6 +307,35 @@ def ungrounded_numbers(question: str, answer: str, queries: list[dict]) -> list[
     return out
 
 
+# ───────────────────────── 컬럼 진단 (판정에는 쓰지 않음) ─────────────────────────
+@lru_cache
+def _table_columns() -> frozenset[str]:
+    from .schema_catalog import load_catalog  # 캐시 파일만 읽는다 (DB 불필요)
+
+    return frozenset(c["name"] for t in load_catalog()["tables"].values() for c in t["columns"])
+
+
+def sql_columns(sql: str) -> set[str] | None:
+    """SQL이 참조하는 실제 테이블 컬럼 이름. 별칭·CTE 컬럼은 스키마에 없으므로 빠진다."""
+    try:
+        tree = sqlglot.parse_one(sql, read="postgres")
+    except sqlglot.errors.ParseError:
+        return None
+    names = {c.name.lower() for c in tree.find_all(exp.Column)}
+    return names & _table_columns()
+
+
+def column_diff(q: dict, queries: list[dict]) -> tuple[list[str] | None, list[str] | None]:
+    """정답 SQL과 마지막 성공 쿼리의 컬럼 차이 (columns_missing, columns_extra)."""
+    done = [x for x in queries if x.get("ok")]
+    if not q.get("gold_sql") or not done:
+        return None, None
+    gold, agent = sql_columns(q["gold_sql"]), sql_columns(done[-1]["sql"])
+    if gold is None or agent is None:
+        return None, None
+    return sorted(gold - agent), sorted(agent - gold)
+
+
 # ───────────────────────── 문항 판정 ─────────────────────────
 def grade(q: dict, gold: dict | None, record: dict) -> dict:
     """5.7 문항 판정. record에 error가 있으면 실행 중 예외로 본다."""
@@ -317,6 +350,7 @@ def grade(q: dict, gold: dict | None, record: dict) -> dict:
         "forbidden_hits": check_forbidden(q, answer),
         "ungrounded_numbers": ungrounded_numbers(q["question"], answer, queries),
     }
+    out["columns_missing"], out["columns_extra"] = column_diff(q, queries)
     if q["answer_type"] == "refusal":
         out["correct"] = not record.get("error") and not out["mentions_missing"] and not out["forbidden_hits"]
     else:
