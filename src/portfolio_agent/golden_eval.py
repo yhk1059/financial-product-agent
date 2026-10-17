@@ -316,10 +316,15 @@ def _table_columns() -> frozenset[str]:
 
 
 def sql_columns(sql: str) -> set[str] | None:
-    """SQL이 참조하는 실제 테이블 컬럼 이름. 별칭·CTE 컬럼은 스키마에 없으므로 빠진다."""
+    """SQL이 참조하는 실제 테이블 컬럼 이름. 별칭·CTE 컬럼은 스키마에 없으므로 빠진다.
+
+    실행된 SQL과 똑같이 sql_guard.validate를 거쳐 파싱한다(숫자로 시작하는 별칭 보정 포함).
+    """
+    from .sql_guard import SQLGuardError, validate
+
     try:
-        tree = sqlglot.parse_one(sql, read="postgres")
-    except sqlglot.errors.ParseError:
+        tree = sqlglot.parse_one(validate(sql), read="postgres")
+    except (SQLGuardError, sqlglot.errors.ParseError):
         return None
     names = {c.name.lower() for c in tree.find_all(exp.Column)}
     return names & _table_columns()

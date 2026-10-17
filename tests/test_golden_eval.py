@@ -207,6 +207,8 @@ def test_sql_columns_drops_aliases_and_ctes():
     assert sql_columns(QUESTIONS["C1-01"]["gold_sql"]) == {"curr_cd", "trade_price", "crd_grd"}
     assert "n" not in sql_columns(QUESTIONS["C4-06"]["gold_sql"])  # CTE 컬럼 별칭
     assert sql_columns("SELECT (") is None
+    # 숫자로 시작하는 별칭은 sql_guard처럼 보정한 뒤 파싱한다 (기준선 C3-01)
+    assert sql_columns("SELECT pd_nm AS 상품명, du_er_1y AS 1년수익률 FROM pref01n001") == {"pd_nm", "du_er_1y"}
 
 
 def test_column_diff_in_grade():

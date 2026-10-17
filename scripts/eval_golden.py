@@ -137,11 +137,13 @@ def rescore(args) -> None:
         r.update(grade(qmap[r["id"]], gold.get(r["id"]), r))
         if before != r["correct"]:
             changed.append(f"{r['id']}:{'X→O' if r['correct'] else 'O→X'}")
-    print(summary(rows, [qmap[r["id"]] for r in rows]))
-    print("판정 변경:", ", ".join(changed) if changed else "없음")
     if args.write:
         path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
         print(f"파일 갱신: {path}")
+        write_summary(rows[0]["label"], rows, [qmap[r["id"]] for r in rows])
+    else:
+        print(summary(rows, [qmap[r["id"]] for r in rows]))
+    print("판정 변경:", ", ".join(changed) if changed else "없음")
 
 
 # ───────────────────────── 요약 ─────────────────────────
