@@ -18,6 +18,7 @@
       AND crd_grd IN ('AAA', 'AA+', 'AA0', 'AA-')
   key_columns: [bond_count]
   must_mention: [판매 가능(당사 판매 물량) 기준, 판매 건 기준 개수]
+  mention_keywords: ['판매 가능|판매가능|당사 판매|판매 물량|판매중|판매 중', '판매 건|판매건|건 기준|건수|LOT|로트|판매 단위']
   decision_needed:
     question: 같은 채권이 판매 LOT별로 여러 행이다. 종목 수와 판매 건수 중 무엇을 셀까?
     resolved: 판매 건(행) 기준
@@ -44,6 +45,7 @@
     ORDER BY mat_dt, pd_no
   key_columns: [pd_no]
   must_mention: [기준일 2026-08-21]
+  mention_keywords: ['2026-08-21|2026년 8월 21일|2026.08.21|2026/08/21|8월 21일']
   notes: 만기 기준일을 오늘 날짜로 계산하면 결과가 달라진다(P-DATE 검증용).
 
 - id: C1-03
@@ -115,6 +117,7 @@
       AND han_clas_fee_type = '수수료미징구'
   key_columns: [class_count]
   must_mention: [클래스 기준 개수]
+  mention_keywords: ['클래스']
 
 - id: C1-07
   category: C1
@@ -168,6 +171,7 @@
     ORDER BY avg_return_1y DESC
   key_columns: [zrin_btyp_nm, avg_return_1y]
   must_mention: [1년 수익률 결측 클래스 제외]
+  mention_keywords: ['결측|제외|정보가 없는|데이터가 없는|값이 없는|NULL']
 
 - id: C2-03
   category: C2
@@ -184,6 +188,7 @@
     ORDER BY bond_count DESC
   key_columns: [std_pd_mcls_nm, bond_count]
   must_mention: [종목 기준 개수]
+  mention_keywords: ['종목']
 
 - id: C2-04
   category: C2
@@ -221,6 +226,7 @@
     WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모' AND zrin_btyp_nm = 'MMF'
   key_columns: [class_count]
   must_mention: [클래스 기준 개수]
+  mention_keywords: ['클래스']
   decision_needed:
     question: MMF 구분을 제로인 대유형(zrin_btyp_nm)과 운용속성(or_attr_desc) 중 무엇으로 할까?
     resolved: 제로인 대유형 MMF
@@ -245,6 +251,7 @@
     WHERE pd_grp_no = 'ETN'
   key_columns: [leverage_pct]
   must_mention: [배수 정보 없는 ETN 제외]
+  mention_keywords: ['배수 정보|배수 데이터|배수가 없|결측|제외|미입력|정보가 없는']
   decision_needed:
     question: 배수 정보가 없는 ETN(123개)을 분모에 넣을까?
     resolved: 분모에서 제외
@@ -374,6 +381,7 @@
   key_columns: [pd_abrv_nm]
   order_matters: true
   must_mention: [보수 정보가 있는 일부 ETF만 대상]
+  mention_keywords: ['보수 정보가 있는|보수 정보|보수 데이터|67개|일부|결측|제외']
 
 # ───────────────────────── C4 관계 탐색 ─────────────────────────
 - id: C4-01
@@ -450,6 +458,7 @@
     WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모' AND rptt_ksd_itm_no IS NOT NULL
   key_columns: [fund_count]
   must_mention: [대표번호 없는 클래스 제외]
+  mention_keywords: ['대표번호|대표 번호|대표펀드 번호|대표펀드 코드|대표펀드 정보|제외|없는 클래스']
 
 - id: C4-05
   category: C4
@@ -493,6 +502,7 @@
     SELECT 'TIGER 200', n FROM t WHERE n NOT IN (SELECT n FROM k)
     ORDER BY only_in, component_name
   key_columns: [only_in, component_name]
+  label_columns: ['only_in']
   notes: 결측이 많은 벤치마크 컬럼을 쓰던 'S&P 500 TR 국내·해외 ETF 수' 질문을 결측 영향이 없는 ETF 간 구성종목 비교로 교체했다(2026-10-16 결정).
 
 # ───────────────────────── C5 비교 ─────────────────────────
@@ -511,7 +521,9 @@
     SELECT 'overseas', ROUND(AVG(cu_charge_rt), 4), COUNT(*)
     FROM pref02n001 WHERE pd_grp_no = 'ETF' AND cu_charge_rt IS NOT NULL
   key_columns: [market, avg_fee]
+  label_columns: ['market']
   must_mention: [국내 ETF는 보수 정보가 있는 일부만 비교]
+  mention_keywords: ['67개|보수 정보가 있는|보수 정보|일부|결측|제외']
 
 - id: C5-02
   category: C5
@@ -541,6 +553,8 @@
   policy_refs: [P-OOS]
   answer_type: refusal
   must_mention: [자회사 관계 데이터 없음]
+  mention_keywords: ['데이터에 없|데이터가 없|데이터는 없|정보가 없|정보는 없|포함되어 있지 않|포함돼 있지 않|확인할 수 없|확인이 어렵|제공하지 않|답변드리기 어렵|알 수 없|근거가 없']
+  forbidden_patterns: ['에코프로비엠|에코프로에이치엔|에코프로머티']
   notes: LLM이 기억하는 자회사 목록(에코프로비엠 등)으로 조회해 답하면 근거 없는 답으로 오답 처리한다.
 
 - id: C6-02
@@ -552,6 +566,8 @@
   policy_refs: [P-OOS]
   answer_type: refusal
   must_mention: [편입 비중 데이터 없음]
+  mention_keywords: ['데이터에 없|데이터가 없|데이터는 없|정보가 없|정보는 없|포함되어 있지 않|포함돼 있지 않|확인할 수 없|확인이 어렵|제공하지 않|답변드리기 어렵|알 수 없|근거가 없']
+  forbidden_patterns: ['\d+(\.\d+)?\s*%']
 
 - id: C6-03
   category: C6
@@ -562,3 +578,5 @@
   policy_refs: [P-OOS]
   answer_type: refusal
   must_mention: [예측·추천 불가]
+  mention_keywords: ['예측할 수 없|예측은 어렵|예측이 어렵|예측하기 어렵|예측이 불가|예측은 불가|추천드리기 어렵|추천할 수 없|추천은 어렵|추천하기 어렵|데이터에 없|데이터가 없|데이터는 없|정보가 없|정보는 없|포함되어 있지 않|포함돼 있지 않|확인할 수 없|확인이 어렵|제공하지 않|답변드리기 어렵|알 수 없|근거가 없']
+  forbidden_patterns: ['추천드립니다|추천합니다|사세요|매수하시|매수를 추천|찍어드리']

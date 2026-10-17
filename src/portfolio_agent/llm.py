@@ -17,6 +17,8 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
+_retry_wait_seconds = 0.0  # 프로세스 시작 이후 429 재시도로 기다린 누적 시간 (평가 비용 기록용)
+
 
 @lru_cache
 def get_llm(max_tokens: int = 2048) -> ChatClovaX:
@@ -30,11 +32,16 @@ def get_llm(max_tokens: int = 2048) -> ChatClovaX:
     )
 
 
+def retry_wait_seconds() -> float:
+    return _retry_wait_seconds
+
+
 def invoke_with_retry(runnable, messages, attempts: int = 5):
     """분당 토큰 한도(429)에 걸리면 한도가 풀릴 때까지 기다렸다가 다시 호출한다.
 
     openai 클라이언트의 기본 백오프(최대 수 초)로는 60초 단위 토큰 한도가 풀리지 않아 따로 둔다.
     """
+    global _retry_wait_seconds
     for i in range(attempts):
         try:
             return runnable.invoke(messages)
@@ -44,3 +51,4 @@ def invoke_with_retry(runnable, messages, attempts: int = 5):
             wait = 15 * (i + 1)
             log.warning("CLOVA Studio rate limit; retrying in %ss", wait)
             time.sleep(wait)
+            _retry_wait_seconds += wait

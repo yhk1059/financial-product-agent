@@ -18,6 +18,7 @@ from sqlglot import exp
 
 from portfolio_agent import db
 from portfolio_agent.config import PROJECT_ROOT, settings
+from portfolio_agent.golden_eval import sql_sha
 from portfolio_agent.sql_guard import SQLGuardError, validate
 
 GOLDEN_DIR = PROJECT_ROOT / "golden"
@@ -61,7 +62,7 @@ def boundary_tie(sql: str, key_columns: list[str]) -> list | None:
 
 
 def verify(q: dict) -> dict:
-    out = {"id": q["id"], "warnings": []}
+    out = {"id": q["id"], "sql_sha": sql_sha(q), "warnings": []}
     if q["answer_type"] == "refusal":
         return out
 

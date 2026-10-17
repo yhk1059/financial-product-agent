@@ -33,6 +33,20 @@ def test_question_fields(q):
         assert opt["label"] and opt["sql"]
 
 
+@pytest.mark.parametrize("q", QUESTIONS, ids=lambda q: q.get("id", "?"))
+def test_scoring_fields(q):
+    """채점 필드 (design.md 4절·5.6)."""
+    assert len(q.get("mention_keywords", [])) == len(q.get("must_mention", []))
+    assert all(kw and "||" not in kw for kw in q.get("mention_keywords", []))
+    if q["category"] == "C6":
+        assert q.get("forbidden_patterns")
+    for p in q.get("forbidden_patterns", []):
+        re.compile(p)
+    assert set(q.get("label_columns", [])) <= set(q.get("key_columns", []))
+    for alt in q.get("accept_alternatives", []):
+        assert q.get("order_matters") and alt["rank"] >= 1 and "key" in alt
+
+
 def test_ids_unique():
     ids = [q["id"] for q in QUESTIONS]
     assert len(ids) == len(set(ids))

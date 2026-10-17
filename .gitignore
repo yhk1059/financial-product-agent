@@ -20,4 +20,4 @@ wheels/
 .vscode/
 
 # Eval outputs
-data/eval_results.json
+data/golden_runs/

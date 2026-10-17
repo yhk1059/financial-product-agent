@@ -7,35 +7,92 @@
 """
 
 import argparse
+import time
 import uuid
+from dataclasses import dataclass, field
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from . import llm
+from .config import settings
 from .graph import build_chat_agent
 
 
-def ask(agent, question: str, thread_id: str, show_sql: bool = False) -> str:
-    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 30}
-    answer = ""
+class _UsageCounter(BaseCallbackHandler):
+    """그래프 안의 모든 LLM 호출(구조화 출력 포함)의 호출 수와 토큰을 센다."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.tokens: int | None = None
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        self.calls += 1
+        for gens in response.generations:
+            for g in gens:
+                usage = getattr(getattr(g, "message", None), "usage_metadata", None)
+                if usage:
+                    self.tokens = (self.tokens or 0) + usage.get("total_tokens", 0)
+
+
+@dataclass
+class AskTrace:
+    """질문 하나의 실행 기록 (golden/design.md 5.3)."""
+
+    answer: str = ""
+    selected_tables: list[str] = field(default_factory=list)
+    queries: list[dict] = field(default_factory=list)  # {"sql", "ok", "output"}
+    gave_up: bool = False
+    llm_calls: int = 0
+    tokens: int | None = None
+    seconds: float = 0.0
+    retry_wait_seconds: float = 0.0
+
+
+def ask(agent, question: str, thread_id: str, show_sql: bool = False) -> AskTrace:
+    usage = _UsageCounter()
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 30, "callbacks": [usage]}
+    trace = AskTrace()
+    pending_sql: dict[str, str] = {}  # tool_call_id → 실행될 SQL (check_query가 같은 id로 교체)
+    attempts = 0
+    start, wait_before = time.time(), llm.retry_wait_seconds()
     for update in agent.stream(
         {"messages": [HumanMessage(question)]}, config, stream_mode="updates"
     ):
         for node, data in update.items():
             if not data:
                 continue
-            if node == "select_tables" and show_sql:
-                print(f"  [tables] {', '.join(data['selected_tables']) or '-'}")
+            attempts = data.get("attempts", attempts)  # count_attempt·check_query가 갱신
+            if node == "select_tables":
+                trace.selected_tables = data["selected_tables"]
+                if show_sql:
+                    print(f"  [tables] {', '.join(data['selected_tables']) or '-'}")
             for m in data.get("messages", []):
-                if show_sql and isinstance(m, AIMessage) and m.tool_calls:
-                    tag = "sql(검토후)" if node == "check_query" else "sql"
+                if isinstance(m, AIMessage) and m.tool_calls:
                     for call in m.tool_calls:
-                        print(f"  [{tag}] {call['args'].get('query')}")
-                elif show_sql and isinstance(m, ToolMessage):
-                    preview = m.text.splitlines()
-                    print(f"  [result] {preview[-1] if preview else ''}")
-                elif node == "generate_query" and isinstance(m, AIMessage) and not m.tool_calls:
-                    answer = m.text
-    return answer
+                        pending_sql[call["id"]] = call["args"].get("query", "")
+                        if show_sql:
+                            tag = "sql(검토후)" if node == "check_query" else "sql"
+                            print(f"  [{tag}] {call['args'].get('query')}")
+                elif isinstance(m, ToolMessage):
+                    trace.queries.append(
+                        {
+                            "sql": pending_sql.get(m.tool_call_id, ""),
+                            "ok": not m.text.startswith("Error:"),
+                            "output": m.text,
+                        }
+                    )
+                    if show_sql:
+                        preview = m.text.splitlines()
+                        print(f"  [result] {preview[-1] if preview else ''}")
+                elif node == "generate_query" and isinstance(m, AIMessage):
+                    trace.answer = m.text
+    # 실행 횟수가 한도에 닿은 뒤의 답변은 give_up 모드에서 나온다(graph.generate_query).
+    trace.gave_up = attempts >= settings.max_query_attempts
+    trace.llm_calls, trace.tokens = usage.calls, usage.tokens
+    trace.seconds = round(time.time() - start, 2)
+    trace.retry_wait_seconds = llm.retry_wait_seconds() - wait_before
+    return trace
 
 
 def main() -> None:
@@ -49,7 +106,7 @@ def main() -> None:
     thread_id = str(uuid.uuid4())
 
     if args.question:
-        print(ask(agent, args.question, thread_id, args.show_sql))
+        print(ask(agent, args.question, thread_id, args.show_sql).answer)
         return
 
     print("금융상품 데이터 에이전트입니다. 질문을 입력하세요. (종료: exit, 새 대화: /new)")
@@ -67,7 +124,7 @@ def main() -> None:
             thread_id = str(uuid.uuid4())
             print("새 대화를 시작합니다.")
             continue
-        print("\n" + ask(agent, question, thread_id, args.show_sql))
+        print("\n" + ask(agent, question, thread_id, args.show_sql).answer)
 
 
 if __name__ == "__main__":

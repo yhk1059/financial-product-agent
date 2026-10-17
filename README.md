@@ -48,5 +48,6 @@ START → select_tables → generate_query ─┬─(도구 호출 없음)→ EN
 ```bash
 uv run pytest                                # sql_guard·DB 테스트
 uv run python scripts/build_schema_cache.py  # DB 데이터가 바뀌면 스키마 카드 재생성
-uv run python scripts/run_eval.py            # 평가 질문셋 정답률 측정
+uv run python scripts/verify_golden.py       # 골든 데이터셋 정답 스냅샷 재생성
+uv run python scripts/eval_golden.py --label base   # 골든 데이터셋 채점 (golden/design.md 5절)
 ```
