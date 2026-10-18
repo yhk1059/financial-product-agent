@@ -1,16 +1,19 @@
 """골든 데이터셋 정답 SQL을 실행·검사하고 정답 스냅샷과 검토표를 만든다.
 
 uv run python scripts/verify_golden.py [--version v2]
+uv run python scripts/verify_golden.py --questions golden/holdout_v1.yaml --out golden/gold_results_holdout_v1.json
 
 출력:
 - golden/gold_results_{version}.json : 문항별 정답 결과 스냅샷, 선택지별 결과, 경고
-- golden/review_sheet.md             : 사용자 검토용 요약표
+- golden/review_sheet.md             : 사용자 검토용 요약표 (--questions 없이 실행할 때만)
+- --questions/--out                  : 다른 문항 파일(예: 홀드아웃)의 정답 스냅샷을 지정한 경로에 쓴다
 """
 
 import argparse
 import decimal
 import json
 from datetime import date, datetime
+from pathlib import Path
 
 import sqlglot
 import yaml
@@ -163,9 +166,12 @@ def write_review_sheet(questions: list[dict], results: dict[str, dict], version:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", default="v2")
+    parser.add_argument("--questions", type=Path, help="문항 YAML 경로 (기본: golden/questions_{version}.yaml)")
+    parser.add_argument("--out", type=Path, help="정답 스냅샷 경로 (기본: golden/gold_results_{version}.json)")
     args = parser.parse_args()
 
-    questions = yaml.safe_load((GOLDEN_DIR / f"questions_{args.version}.yaml").read_text())
+    questions_path = args.questions or GOLDEN_DIR / f"questions_{args.version}.yaml"
+    questions = yaml.safe_load(questions_path.read_text())
     results = {}
     for q in questions:
         results[q["id"]] = verify(q)
@@ -175,11 +181,14 @@ def main() -> None:
         for w in r["warnings"]:
             print(f"       - {w}")
 
-    out = GOLDEN_DIR / f"gold_results_{args.version}.json"
+    out = args.out or GOLDEN_DIR / f"gold_results_{args.version}.json"
     out.write_text(json.dumps(results, ensure_ascii=False, indent=1))
-    write_review_sheet(questions, results, args.version)
+    written = [out.name]
+    if args.questions is None:  # 검토표는 기본 골든 문항 파일로 실행할 때만 다시 쓴다
+        write_review_sheet(questions, results, args.version)
+        written.append("review_sheet.md")
     n_warn = sum(bool(r["warnings"]) for r in results.values())
-    print(f"\n{len(questions)}문항, 경고 {n_warn}건 → {out.name}, review_sheet.md")
+    print(f"\n{len(questions)}문항, 경고 {n_warn}건 → {', '.join(written)}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,280 @@
+# 홀드아웃 v1 (14문항)
+# 목적: ontology YAML(model·glossary·rules)이 골든 30문항 밖으로 일반화되는지 확인한다.
+#       골든과 같은 지식을 다른 맥락(다른 테이블·유형·집계·이름)에서 묻는다. 골든 질문의 표현만 바꾼 문항은 두지 않는다.
+# 규칙: ontology YAML을 쓰기 전에 고정했다. 확정 뒤에는 고치지 않는다(바꾸면 holdout_v2로 올린다).
+# 형식: golden/questions_v2.yaml과 같고, 문항마다 검사하는 일반 지식을 `tests_knowledge`에 적는다.
+# 정답 스냅샷: golden/gold_results_holdout_v1.json
+#   uv run python scripts/verify_golden.py --questions golden/holdout_v1.yaml --out golden/gold_results_holdout_v1.json
+
+- id: H-01
+  category: C1
+  difficulty: easy
+  tables: [pref01n001]
+  question: 국내에 상장된 ETP 중에 원자재에 투자하는 상품은 몇 개야?
+  interpretation: 국내 상장상품 중 ETF와 ETN을 모두 포함해 투자자산군이 원자재인 상품 수.
+  policy_refs: [P-SCOPE, P-PRODUCT, P-ASSET]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(*) AS product_count
+    FROM pref01n001
+    WHERE wu_inv_ast_type = '원자재'
+  key_columns: [product_count]
+  tests_knowledge:
+    - ETP·상장상품은 ETF와 ETN을 모두 가리킨다(ETF만 세면 20개)
+    - 국내 상장상품의 자산군은 투자자산군(한글 값)으로 판단한다
+
+- id: H-02
+  category: C4
+  difficulty: hard
+  tables: [prfd01n001]
+  question: 지금 판매중인 공모 해외채권형 펀드가 대표펀드로 치면 몇 개야?
+  interpretation: 판매중·공모·제로인 대유형 해외채권형 클래스를 대표예탁원종목번호 기준으로 센 대표펀드 수.
+  policy_refs: [P-SALE, P-UNIT, P-ASSET]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(DISTINCT rptt_ksd_itm_no) AS fund_count
+    FROM prfd01n001
+    WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모'
+      AND zrin_btyp_nm = '해외채권형'
+  key_columns: [fund_count]
+  notes: 이 유형에는 대표번호 결측 클래스가 없다. 운용속성(or_attr_desc)으로 보면 '채권형'과 '재간접'으로 갈려 다른 답이 나온다.
+  tests_knowledge:
+    - 펀드 테이블 1행은 클래스이고, 대표펀드는 대표예탁원종목번호로 묶은 단위다
+    - 펀드 판매중은 판매여부 '판매중'이다
+    - 펀드 유형의 정본은 제로인 대유형이고, 운용속성은 혼동어다
+
+- id: H-03
+  category: C2
+  difficulty: medium
+  tables: [pref01n001]
+  question: 국내 ETF 총보수의 중앙값은 얼마야?
+  interpretation: 국내 ETF 총보수(text를 numeric으로 변환) 중 결측과 '0'(미입력)을 제외한 값의 중앙값.
+  policy_refs: [P-PRODUCT, P-NULL, P-ZERO, P-UNITS]
+  answer_type: scalar
+  gold_sql: |
+    SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY cu_charge_rt::numeric) AS median_fee
+    FROM pref01n001
+    WHERE pd_grp_no = 'ETF' AND cu_charge_rt::numeric > 0
+  key_columns: [median_fee]
+  must_mention: [보수 정보가 있는 일부 ETF만 대상]
+  mention_keywords: ['67개|보수 정보가 있는|보수 정보|미입력|결측|제외|일부']
+  notes: "'0'을 포함하면 중앙값이 0이 된다(보수 값이 있는 217개 중 150개가 '0')."
+  tests_knowledge:
+    - 국내 ETF 총보수의 '0'은 미입력이라 집계에서 뺀다(해외 ETF 보수 0과 다르다)
+    - 국내 ETF 총보수는 text라 숫자로 변환해 계산한다
+    - 결측이 많은 컬럼으로 집계하면 제외 사실을 답변에 밝힌다
+
+- id: H-04
+  category: C4
+  difficulty: medium
+  tables: [prbd01n001]
+  question: 한전이 발행한 채권은 몇 종목이야?
+  interpretation: 발행기관 '한국전력공사(주)'가 발행한 채권의 종목 수(DISTINCT pd_no).
+  policy_refs: [P-SCOPE, P-UNIT, P-NAME]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(DISTINCT pd_no) AS bond_count
+    FROM prbd01n001
+    WHERE pd_pbcm = '한국전력공사(주)'
+  key_columns: [bond_count]
+  notes: 행 수는 403이다. 발행기관명에 '한전'을 부분 일치로 찾으면 '대한전선(주)'이 함께 걸린다.
+  tests_knowledge:
+    - 발행기관은 약칭으로 물을 수 있어 실제 발행기관명 원문으로 연결해야 한다
+    - 채권 개수는 종목 기준으로 센다(같은 종목이 시장·LOT별로 여러 행)
+
+- id: H-05
+  category: C1
+  difficulty: easy
+  tables: [pref01n001]
+  question: KODEX 레버리지 순자산이 얼마나 돼?
+  interpretation: 상품약어명 'KODEX 레버리지'인 국내 ETF의 순자산총액(pd_net_tamt).
+  policy_refs: [P-NAME, P-UNITS]
+  answer_type: scalar
+  gold_sql: |
+    SELECT pd_net_tamt
+    FROM pref01n001
+    WHERE pd_abrv_nm = 'KODEX 레버리지'
+  key_columns: [pd_net_tamt]
+  notes: 유통순자산총액(pd_circ_net_tamt)은 이 상품에서 0이다. 정식 상품명(pd_nm)은 '삼성KODEX레버리지증권상장지수투자신탁[주식-파생형]'이다.
+  tests_knowledge:
+    - 국내 상장상품 이름은 상품약어명으로 부르고, 정식 상품명과 다르다
+    - 국내 상장상품 순자산의 정본은 순자산총액이고 유통순자산총액은 혼동어다
+
+- id: H-06
+  category: C3
+  difficulty: medium
+  tables: [pref01n001]
+  question: 국내 채권에 투자하는 ETF 중 순자산 상위 3개 알려줘
+  interpretation: 투자지역 국내·투자자산군 채권인 국내 ETF를 순자산총액 내림차순으로 3개. 순자산 결측 제외.
+  policy_refs: [P-PRODUCT, P-ASSET, P-NULL, P-TIE]
+  answer_type: list
+  gold_sql: |
+    SELECT pd_abrv_nm, pd_nm, pd_itm_no, pd_net_tamt
+    FROM pref01n001
+    WHERE pd_grp_no = 'ETF' AND wu_inv_rgn = '국내' AND wu_inv_ast_type = '채권'
+      AND pd_net_tamt IS NOT NULL
+    ORDER BY pd_net_tamt DESC
+    LIMIT 3
+  key_columns: [pd_abrv_nm]
+  key_alternatives: {pd_abrv_nm: [pd_nm, pd_itm_no]}
+  order_matters: true
+  notes: 유통순자산총액으로 정렬하면 1위가 빠진다(1위 상품의 유통순자산이 0). 순자산 결측 행을 빼지 않으면 내림차순에서 NULL이 앞에 온다.
+  tests_knowledge:
+    - 국내 상장상품 순자산의 정본은 순자산총액이고, 유통순자산총액의 0은 실제 규모가 아니다
+    - Top-N 정렬에서 정렬 컬럼 결측은 빼거나 뒤로 보낸다
+    - 국내 ETF '국내 ○○에 투자'는 투자지역 국내와 투자자산군으로 본다
+
+- id: H-07
+  category: C1
+  difficulty: medium
+  tables: [prbd01n001]
+  question: 신용등급 A0 이상인 회사채는 몇 종목이야?
+  interpretation: 상품중분류 회사채 중 적용신용등급이 AAA~A0인 채권의 종목 수.
+  policy_refs: [P-SCOPE, P-UNIT, P-GRADE]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(DISTINCT pd_no) AS bond_count
+    FROM prbd01n001
+    WHERE std_pd_mcls_nm = '회사채'
+      AND crd_grd IN ('AAA', 'AA+', 'AA0', 'AA-', 'A+', 'A0')
+  key_columns: [bond_count]
+  notes: 행 기준으로 세면 11,528이다.
+  tests_knowledge:
+    - 신용등급 'X 이상'은 문자열 비교가 아니라 등급 순서 목록으로 비교한다
+    - 채권 개수는 종목 기준으로 센다
+    - 판매 여부가 없는 질문은 전체 데이터가 대상이다
+
+- id: H-08
+  category: C1
+  difficulty: medium
+  tables: [pref01n001]
+  question: 위험등급이 보통 위험 이하인 국내 ETF는 몇 개야?
+  interpretation: 국내 ETF 중 상품위험등급이 보통위험(4등급)·낮은위험(5등급)·매우낮은위험(6등급)인 상품 수.
+  policy_refs: [P-SCOPE, P-PRODUCT]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(*) AS etf_count
+    FROM pref01n001
+    WHERE pd_grp_no = 'ETF'
+      AND pd_risk_nm IN ('보통위험(4등급)', '낮은위험(5등급)', '매우낮은위험(6등급)')
+  key_columns: [etf_count]
+  tests_knowledge:
+    - 투자위험등급은 1등급(매우 높은 위험)에서 6등급(매우 낮은 위험) 순서이고, 'X 이하'는 위험이 같거나 낮은 쪽이다
+    - 위험등급 비교는 이름 문자열이 아니라 등급 순서로 한다
+
+- id: H-09
+  category: C2
+  difficulty: medium
+  tables: [prfd01n001]
+  question: 판매중인 공모 MMF의 평균 1년 수익률은 얼마야?
+  interpretation: 판매중·공모이고 제로인 대유형이 MMF 또는 외화 MMF인 클래스의 1년 수익률 평균(소수 둘째 자리). 수익률 결측 클래스 제외.
+  policy_refs: [P-SALE, P-UNIT, P-NULL, P-ASSET, P-UNITS]
+  answer_type: scalar
+  gold_sql: |
+    SELECT ROUND(AVG(fd_yr1_ern_r), 2) AS avg_return_1y
+    FROM prfd01n001
+    WHERE sale_yn = '판매중' AND prvo_pbff_desc = '공모'
+      AND zrin_btyp_nm IN ('MMF', '외화 MMF')
+  key_columns: [avg_return_1y]
+  must_mention: [1년 수익률 결측 클래스 제외]
+  mention_keywords: ['결측|제외|정보가 없는|데이터가 없는|값이 없는|126개|NULL']
+  notes: 외화 MMF를 빼면 2.65, 포함하면 2.69다. 138개 클래스 중 126개만 1년 수익률이 있다.
+  tests_knowledge:
+    - MMF는 제로인 대유형의 MMF와 외화 MMF를 모두 가리킨다
+    - 펀드 판매중은 판매여부 '판매중'이다
+    - 결측이 많은 컬럼으로 집계하면 제외 사실을 답변에 밝힌다
+
+- id: H-10
+  category: C2
+  difficulty: medium
+  tables: [prbd01n001]
+  question: 지금 살 수 있는 채권을 상품소분류별로 몇 종목씩 있는지 정리해줘
+  interpretation: 매수가능수량이 있는(buyable_quantity > 0) 채권을 std_pd_scls_nm별 종목 수로 집계.
+  policy_refs: [P-SALE, P-UNIT]
+  answer_type: table
+  gold_sql: |
+    SELECT std_pd_scls_nm, COUNT(DISTINCT pd_no) AS bond_count
+    FROM prbd01n001
+    WHERE buyable_quantity > 0
+    GROUP BY std_pd_scls_nm
+    ORDER BY bond_count DESC
+  key_columns: [std_pd_scls_nm, bond_count]
+  must_mention: [매수 가능 수량 기준]
+  mention_keywords: ['매수 가능 수량|매수가능수량|매수 가능한 수량|매수가능 수량|수량이 있는|잔여 수량|잔량']
+  notes: 판매 물량 등록(trade_price IS NOT NULL)으로 보면 수량 0인 LOT까지 들어간다.
+  tests_knowledge:
+    - 채권 판매 가능·매수 가능은 매수가능수량이 0보다 큰 판매 LOT이다(판매 물량 등록만으로는 아니다)
+    - 채권 종목 수는 종목번호 기준으로 센다
+
+- id: H-11
+  category: C2
+  difficulty: medium
+  tables: [pref02n001]
+  question: 해외 ETN 평균 보수율이 얼마야?
+  interpretation: 해외 상장상품 중 ETN의 보수율 평균(소수 넷째 자리). 해외 상장상품 보수 0은 실제 값으로 포함.
+  policy_refs: [P-PRODUCT, P-ZERO, P-UNITS]
+  answer_type: scalar
+  gold_sql: |
+    SELECT ROUND(AVG(cu_charge_rt), 4) AS avg_fee
+    FROM pref02n001
+    WHERE pd_grp_no = 'ETN'
+  key_columns: [avg_fee]
+  notes: 보수 0을 빼면 0.9071이다(65개 중 51개가 0).
+  tests_knowledge:
+    - 해외 상장상품 보수율 0은 실제 값으로 집계에 넣는다
+    - 해외 상장상품의 ETF·ETN 구분은 상품군종류로 한다
+
+- id: H-12
+  category: C4
+  difficulty: medium
+  tables: [domestic_etf_holdings, pref01n001]
+  question: 현대차를 담고 있는 국내 ETF 중에 지금 판매중인 건 몇 개야?
+  interpretation: 구성종목명이 '현대차'인 국내 ETF 중 상품판매여부가 1인 ETF 수(ETF 기준 중복 제거).
+  policy_refs: [P-SALE, P-UNIT, P-NAME]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(DISTINCT p.pd_itm_no) AS etf_count
+    FROM pref01n001 p JOIN domestic_etf_holdings h ON h.item_id = p.pd_itm_no
+    WHERE h.component_name = '현대차' AND p.pd_sale_yn = '1'
+  key_columns: [etf_count]
+  notes: 판매 조건이 없으면 169개다. 부분 일치로 찾으면 현대차우·현대차2우B·현대차증권이 함께 걸린다.
+  tests_knowledge:
+    - 국내 상장상품 판매중은 상품판매여부 '1'이다
+    - 구성종목은 국내 ETF 상품번호로 상장상품과 연결되고, ETF 수는 ETF 기준으로 중복 없이 센다
+    - 구성종목명은 정확히 일치하는 이름으로 찾는다
+
+- id: H-13
+  category: C1
+  difficulty: medium
+  tables: [prbd01n001]
+  question: 만기가 2년 안에 돌아오는 지역개발채권은 몇 종목이야?
+  interpretation: 상품소분류 지역개발이고 상환일자가 2026-08-21로부터 2년 이내인 채권의 종목 수.
+  policy_refs: [P-SCOPE, P-UNIT, P-DATE]
+  answer_type: count
+  gold_sql: |
+    SELECT COUNT(DISTINCT pd_no) AS bond_count
+    FROM prbd01n001
+    WHERE std_pd_scls_nm = '지역개발'
+      AND mat_dt <= DATE '2026-08-21' + INTERVAL '2 years'
+  key_columns: [bond_count]
+  must_mention: [기준일 2026-08-21]
+  mention_keywords: ['2026-08-21|2026년 8월 21일|2026.08.21|2026/08/21|8월 21일']
+  notes: 행 기준으로 세면 675다. 이 소분류에는 기준일 전에 만기가 지난 종목이 없어 하한 조건 유무로 답이 바뀌지 않는다.
+  tests_knowledge:
+    - 만기·기간 계산의 기준일은 오늘이 아니라 데이터 기준일 2026-08-21이다
+    - 채권 개수는 종목 기준으로 센다
+
+- id: H-14
+  category: C6
+  difficulty: medium
+  tables: [domestic_etf_holdings, pref02n001]
+  question: 해외 ETF 중에 애플을 담고 있는 상품 알려줘
+  interpretation: 구성종목 데이터는 국내 ETF만 있어 해외 ETF의 편입 종목은 확인할 수 없다. 국내 ETF 중 애플을 편입한 상품은 조회할 수 있다고 안내하면 좋다.
+  policy_refs: [P-OOS]
+  answer_type: refusal
+  must_mention: [데이터에 근거가 없음을 밝힘, 구성종목 데이터가 국내 ETF만 있다는 이유]
+  mention_keywords: ['데이터에 없|데이터가 없|데이터는 없|정보가 없|정보는 없|포함되어 있지 않|포함돼 있지 않|확인할 수 없|확인이 어렵|제공하지 않|답변드리기 어렵|알 수 없|근거가 없', '국내 ETF만|국내 ETF의 구성종목|국내 상장 ETF만|해외 ETF의 구성종목|해외 ETF 구성종목|구성종목 정보가 없|구성종목 데이터가 없|구성종목 정보는 없|보유종목 정보']
+  forbidden_patterns: ['\b(QQQ|XLK|VGT|SPY|VOO|IVV|VTI)\b']
+  notes: 기억에 의존해 해외 ETF 티커를 나열하면 근거 없는 답으로 오답 처리한다.
+  tests_knowledge:
+    - 구성종목 데이터는 국내 ETF에만 있고 해외 상장상품과는 연결되지 않는다
