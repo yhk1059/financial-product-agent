@@ -1,0 +1,298 @@
+# 규칙: 조건·시점·예외·계산
+# - "어떻게 고르고 계산하는가"만 적는다. 개념의 뜻은 model.yaml·glossary.yaml을 참조한다.
+# - type: 조건 / 시점 / 예외 / 계산
+# - applies_to: model 개념·속성(Concept, Concept.column) 또는 glossary 용어 id
+# - when은 질문 의도를 일반 표현으로, then은 의미 수준의 처리로 쓴다. 컬럼 단위의 일반 술어는 허용하고 완성된 쿼리는 쓰지 않는다.
+# - overrides: 이 규칙이 우선하는 규칙 id. depends_on: 먼저 적용해야 하는 규칙 id. disclose: 답변에 밝힐 것.
+# - motivated_by는 추적용 메타데이터이고 프롬프트로 렌더링할 때는 뺀다.
+
+rules:
+  # ───────────────────────── 공통: 범위·판매 ─────────────────────────
+  - id: R-scope-default
+    type: 조건
+    applies_to: [on_sale]
+    when: 질문에 판매중·판매 가능·매수 가능 같은 판매 표현이 없다.
+    then: 판매 여부로 거르지 않고 테이블 전체 행을 대상으로 한다.
+    evidence: [P-SCOPE]
+    motivated_by: [C1-03, C2-01, C2-03, C2-07, C4-05]
+
+  - id: R-sale-domestic-listed
+    type: 조건
+    applies_to: [DomesticListedProduct.pd_sale_yn, on_sale]
+    when: 국내 상장상품을 판매중·판매 가능으로 한정해 묻는다.
+    then: 상품판매여부가 '1'인 상품만 남긴다.
+    generalized_from: 펀드·채권의 판매 가능
+    evidence: [P-SALE, 'profiling:sale_status']
+    motivated_by: [C1-01, C1-06]
+
+  - id: R-sale-overseas-listed
+    type: 조건
+    applies_to: [OverseasListedProduct.pd_sale_yn, on_sale]
+    when: 해외 상장상품을 판매중·판매 가능으로 한정해 묻는다.
+    then: 판매여부가 '1'인 상품만 남긴다(판매여부가 비어 있는 극소수 행은 빠진다).
+    generalized_from: 펀드·채권의 판매 가능
+    evidence: [P-SALE, 'profiling:sale_status']
+    motivated_by: [C1-01, C1-06]
+
+  - id: R-sale-fund
+    type: 조건
+    applies_to: [FundClass.sale_yn, on_sale]
+    when: 펀드를 판매중·판매 가능으로 한정해 묻는다.
+    then: 판매여부가 '판매중'인 클래스만 남기고, 당사판매여부는 판매 조건으로 쓰지 않는다.
+    evidence: [P-SALE]
+    motivated_by: [C1-06, C1-07, C2-02, C2-05, C3-04, C4-04, C5-02]
+
+  - id: R-sale-bond
+    type: 조건
+    applies_to: [BondLot.buyable_quantity, on_sale]
+    when: 채권을 판매 가능·지금 살 수 있는 것으로 한정해 묻는다.
+    then: 매수가능수량이 0보다 큰 판매 LOT만 남긴다. 판매 물량 등록(매매단가 있음)만으로는 판매 가능으로 보지 않는다.
+    disclose: 매수 가능 수량이 있는 LOT 기준이라는 것
+    evidence: [P-SALE, G1, 'profiling:bond_sale_lot']
+    motivated_by: [C1-01, C1-02, C3-03]
+
+  - id: R-product-group
+    type: 조건
+    applies_to: [etf, etn, etp]
+    when: 질문이 ETF, ETN, ETP·상장상품 중 하나를 말한다.
+    then: ETF는 상품군종류 ETF만, ETN은 ETN만, ETP·상장상품은 둘 다 대상으로 한다. 해외 상장상품도 ETN 여부 표시가 아니라 상품군종류로 나눈다.
+    evidence: [P-PRODUCT]
+    motivated_by: [C1-03, C1-05, C2-01, C2-04, C2-06, C3-01, C3-02, C3-05, C5-01]
+
+  # ───────────────────────── 공통: 결측·0·타입 ─────────────────────────
+  - id: R-null-exclude
+    type: 조건
+    applies_to: [DomesticListedProduct, OverseasListedProduct, FundClass, Bond, BondLot]
+    when: 조건·정렬·집계에 쓰는 속성이 비어 있는 행이 있다.
+    then: 그 속성이 비어 있는 행은 조건·정렬·집계 대상에서 뺀다.
+    disclose: 결측률이 10% 이상인 속성을 썼다면 값이 있는 일부만 대상으로 했다는 것과 그 수
+    evidence: [P-NULL]
+    motivated_by: [C1-04, C1-07, C2-02, C2-06, C3-01, C3-02, C3-04, C4-01, C4-04]
+
+  - id: R-zero-is-value
+    type: 조건
+    applies_to: [OverseasListedProduct.cu_charge_rt, Bond.srfc_irt]
+    when: 숫자 속성에 0이 들어 있다.
+    then: 속성 정의의 zero_means가 미입력·미산출이 아니면 0을 실제 값으로 보고 비교·평균에 넣는다.
+    evidence: [P-ZERO, 'profiling:zero_values']
+    motivated_by: [C1-05, C2-04, C5-01]
+
+  - id: R-zero-missing
+    type: 예외
+    applies_to: [DomesticListedProduct.cu_charge_rt, DomesticListedProduct.pd_circ_net_tamt, DomesticListedProduct.du_last_aum]
+    when: zero_means가 미입력·미산출인 속성으로 비교·정렬·집계한다.
+    then: 0인 행을 결측과 같이 보고 대상에서 뺀다.
+    overrides: [R-zero-is-value]
+    disclose: 0을 미입력으로 보고 뺀 것과 계산에 쓴 상품 수
+    generalized_from: 국내 총보수 '0' → 유통순자산총액·최종AUM의 0
+    evidence: [P-ZERO, 'profiling:zero_values']
+    motivated_by: [C3-05, C5-01, C4-01]
+
+  - id: R-text-numeric
+    type: 계산
+    applies_to: [DomesticListedProduct.cu_charge_rt, DomesticListedProduct.cu_lev_fector]
+    when: text로 저장된 숫자 속성으로 비교·정렬·집계한다.
+    then: 숫자로 변환한 뒤 비교·정렬한다. 문자열 그대로 비교하거나 정수로 변환하지 않는다(소수 배수가 있다).
+    evidence: ['schema_catalog:cu_charge_rt', 'schema_catalog:cu_lev_fector']
+    motivated_by: [C2-06, C3-05, C5-01]
+
+  - id: R-topn-nulls
+    type: 계산
+    applies_to: [DomesticListedProduct, OverseasListedProduct, FundClass, BondLot]
+    when: 어떤 속성 기준으로 상위·하위 N개나 최댓값·최솟값을 묻는다.
+    then: 정렬 속성이 비어 있는 행을 빼거나 정렬에서 맨 뒤로 보낸다. 내림차순에서 결측이 앞에 오는 것을 그대로 답하지 않는다.
+    depends_on: [R-null-exclude]
+    evidence: [P-NULL]
+    motivated_by: [C3-01, C3-02, C3-03, C3-04, C3-05, C4-01]
+
+  - id: R-ratio-denominator
+    type: 계산
+    applies_to: [DomesticListedProduct.cu_lev_fector, leverage]
+    when: 어떤 집합 안에서 특정 성질을 가진 것의 비율(비중·%)을 묻는다.
+    then: 성질을 판정하는 속성이 비어 있는 행은 분자와 분모에서 모두 뺀다.
+    disclose: 판정 정보가 없어 분모에서 뺀 행이 있다는 것
+    evidence: [P-NULL]
+    motivated_by: [C2-06]
+
+  - id: R-units
+    type: 계산
+    applies_to: [fee_rate, period_return, coupon_rate, after_tax_yield, net_assets]
+    when: 수익률·보수율·금리 같은 % 속성이나 금액 속성으로 조건을 걸거나 답한다.
+    then: '% 속성은 이미 % 숫자이므로(1.5는 1.5%) 100을 곱하거나 나누지 않는다. 금액은 저장 단위 그대로 계산하고 답변에서만 억원·조원 등으로 환산한다.'
+    evidence: [P-UNITS]
+    motivated_by: [C1-04, C1-05, C1-07, C2-02, C2-04, C2-07]
+
+  - id: R-outlier-raw
+    type: 계산
+    applies_to: [period_return]
+    when: 결과에 다른 값보다 비정상적으로 큰 값이 들어 있다.
+    then: 이상치로 보여도 원본 값을 그대로 쓰고 임의로 빼지 않는다.
+    disclose: 이상치 가능성은 언급해도 된다
+    evidence: [P-OUTLIER]
+    motivated_by: [C2-02, C3-04, C5-02]
+
+  # ───────────────────────── 공통: 시점 ─────────────────────────
+  - id: R-as-of-date
+    type: 시점
+    applies_to: [as_of_date]
+    when: 질문이 지금·현재·오늘을 말하거나 날짜 계산이 필요하다.
+    then: 오늘 날짜가 아니라 데이터 기준일 2026-08-21을 기준으로 계산한다.
+    disclose: 기준일 2026-08-21
+    evidence: [P-DATE]
+    motivated_by: [C1-02]
+
+  - id: R-period-window
+    type: 시점
+    applies_to: [Bond.mat_dt, maturity]
+    when: 만기가 N년(개월) 안에 돌아오는 것처럼 기준일부터의 기간을 묻는다.
+    then: 상환일자가 기준일에 N년을 더한 날 이하인 것을 고른다.
+    depends_on: [R-as-of-date]
+    disclose: 기준일 2026-08-21
+    evidence: [P-DATE]
+    motivated_by: [C1-02]
+
+  # ───────────────────────── 공통: 순서·이름 ─────────────────────────
+  - id: R-credit-grade-order
+    type: 조건
+    applies_to: [Bond.crd_grd, credit_rating]
+    when: 신용등급 X 이상·이하·초과·미만을 묻는다.
+    then: glossary credit_rating의 order 목록에서 X의 위치를 찾아 그보다 높은(이상) 또는 낮은(이하) 등급을 목록으로 고른다. 등급 문자열의 대소 비교는 쓰지 않는다. 등급이 비어 있는 채권은 빠진다.
+    evidence: [P-GRADE]
+    motivated_by: [C1-01, C1-02]
+
+  - id: R-risk-grade-order
+    type: 조건
+    applies_to: [risk_grade, DomesticListedProduct.pd_risk_nm, FundClass.zrin_fd_ivst_risk_grd_nm, FundClass.zrin_fd_ivst_risk_gcd]
+    when: 위험등급 X 이하(덜 위험한 쪽)·이상(더 위험한 쪽)을 묻는다.
+    then: '6단계 순서(1등급 매우 높은 위험 … 6등급 매우 낮은 위험)로 해당 등급들을 목록으로 고른다. 이름은 띄어쓰기를 무시하고 비교하거나 등급 번호·코드로 비교한다.'
+    generalized_from: 펀드 위험등급 → 국내 상장상품·채권
+    evidence: ['profiling:risk_grade']
+    motivated_by: [C1-07]
+
+  - id: R-name-exact
+    type: 조건
+    applies_to: [product_name, Holding.component_name]
+    when: 질문이 특정 상품이나 구성종목을 이름으로 가리킨다.
+    then: glossary product_name이 정한 테이블별 이름 컬럼에서 정확히 일치하는 값으로 찾는다. 구성종목은 구성종목명이 정확히 일치하는 것만 편입으로 본다.
+    evidence: [P-NAME, S4]
+    motivated_by: [C3-01, C4-01, C4-02, C4-03, C4-06]
+
+  - id: R-name-resolve
+    type: 조건
+    applies_to: [issuer, product_name]
+    when: 질문 속 이름이 약칭이거나 법인 표기가 빠져 있어 정확히 일치하는 값이 없을 수 있다.
+    then: 부분 일치로 후보 이름을 먼저 조회하고, 질문이 가리키는 원문 이름 하나를 확인한 뒤 그 원문으로 정확히 일치시켜 집계한다. 부분 일치 결과를 그대로 집계하지 않는다(이름이 겹치는 다른 기관·종목이 섞인다).
+    overrides: [R-name-exact]
+    disclose: 질문의 이름을 어떤 원문 이름으로 해석했는지
+    evidence: [P-NAME, 'profiling:issuer_names']
+    motivated_by: [C4-05]
+
+  - id: R-cross-table-compare
+    type: 계산
+    applies_to: [DomesticListedProduct, OverseasListedProduct, fee_rate]
+    when: 같은 이름의 속성을 두 테이블 사이에서 비교한다.
+    then: 각 테이블 속성의 타입·0의 뜻·결측 규칙을 따로 적용해 계산한 뒤 비교한다.
+    disclose: 테이블마다 계산에 쓴 상품 수와 제외 기준
+    evidence: [P-ZERO, P-NULL]
+    motivated_by: [C5-01]
+
+  - id: R-leverage
+    type: 조건
+    applies_to: [leverage, DomesticListedProduct.cu_lev_fector, OverseasListedProduct.cu_lev_fector]
+    when: 레버리지 상품을 묻는다.
+    then: 배수가 1보다 큰 상품을 레버리지로 본다.
+    depends_on: [R-text-numeric]
+    generalized_from: 국내 ETN → 국내 ETF·해외 상장상품
+    evidence: ['design§8:배수 기준 레버리지 비율', 'profiling:leverage_factor']
+    motivated_by: [C2-06]
+
+  - id: R-oos-refusal
+    type: 조건
+    applies_to: [holding_weight, corporate_group, future_return]
+    when: 질문이 데이터에 없는 개념(in_data false)을 요구한다.
+    then: 데이터에 근거가 없다고 밝히고 그 이유(어떤 정보가 없는지)를 말한다. 기억에 의존한 이름·수치로 답하지 않으며, 데이터로 확인할 수 있는 가까운 정보(편입 여부, 과거 수익률 등)를 안내한다.
+    disclose: 없는 정보가 무엇인지
+    evidence: [P-OOS, S3]
+    motivated_by: [C6-01, C6-02, C6-03]
+
+  # ───────────────────────── 채권 ─────────────────────────
+  - id: R-bond-unit-item
+    type: 계산
+    applies_to: [Bond, bond_item]
+    when: 채권의 개수·목록·평균 등을 묻는다.
+    then: 같은 종목이 시장·LOT별로 여러 행이므로 채권종목번호 기준으로 중복을 없앤 뒤 세거나 목록·평균을 만든다.
+    evidence: [P-UNIT]
+    motivated_by: [C1-02, C2-03, C2-07, C3-03, C4-05]
+
+  - id: R-bond-unit-sale-count
+    type: 예외
+    applies_to: [BondLot, on_sale]
+    when: 판매 가능(매수 가능 수량이 있는) 채권의 개수를 묻는다.
+    then: 종목이 아니라 판매 건(판매 LOT 행) 기준으로 센다. 목록을 묻는 경우는 이 예외가 아니고 종목 기준이다.
+    overrides: [R-bond-unit-item]
+    depends_on: [R-sale-bond]
+    evidence: [P-UNIT, 'profiling:bond_sale_lot']
+    motivated_by: [C1-01]
+
+  - id: R-bond-item-best-lot
+    type: 계산
+    applies_to: [BondLot.after_tax_yield, Bond]
+    when: 종목 단위 순위인데 같은 종목의 대상 LOT마다 값이 다를 수 있다.
+    then: 조건에 맞는 LOT만 남긴 뒤 종목별로 가장 유리한 값(수익률은 최댓값) 하나로 묶어 순위를 매긴다.
+    depends_on: [R-sale-bond, R-bond-unit-item]
+    evidence: [P-UNIT, G1]
+    motivated_by: [C3-03]
+
+  # ───────────────────────── 펀드 ─────────────────────────
+  - id: R-fund-unit-class
+    type: 계산
+    applies_to: [FundClass, fund_class]
+    when: 펀드 개수·목록·평균을 묻고 대표펀드 기준이라는 말이 없다.
+    then: 클래스 행 하나를 하나로 센다.
+    evidence: [P-UNIT]
+    motivated_by: [C1-06, C1-07, C2-05, C3-04]
+
+  - id: R-fund-unit-representative
+    type: 계산
+    applies_to: [Fund, representative_fund, FundClass.rptt_ksd_itm_no]
+    when: 대표펀드 기준·클래스 말고 펀드 단위로 묻는다.
+    then: 판매·공모·유형 같은 조건은 클래스에 먼저 적용하고, 남은 클래스를 대표예탁원종목번호로 중복 없이 센다. 대표번호가 비어 있는 클래스는 뺀다.
+    overrides: [R-fund-unit-class]
+    disclose: 대표번호가 없는 클래스를 뺀 것
+    evidence: [P-UNIT, P-NULL, 'profiling:fund_grain']
+    motivated_by: [C4-04]
+
+  # ───────────────────────── 구성종목 ─────────────────────────
+  - id: R-holding-etf-count
+    type: 계산
+    applies_to: [Holding, DomesticEtf]
+    when: 어떤 종목을 편입한 ETF의 수나 목록을 묻는다.
+    then: 같은 ETF에 같은 종목명이 여러 번 등재될 수 있으므로 ETF 상품번호 기준으로 중복 없이 센다.
+    evidence: [P-UNIT, 'profiling:holding_duplicates']
+    motivated_by: [C4-01, C4-03]
+
+  - id: R-holding-component-count
+    type: 계산
+    applies_to: [Holding.component_name, holding]
+    when: ETF의 구성종목 수를 묻는다.
+    then: 그 ETF의 구성종목명을 중복 없이 센다.
+    depends_on: [R-cash-exclusion]
+    evidence: [P-CASH, P-UNIT]
+    motivated_by: [C4-02]
+
+  - id: R-cash-exclusion
+    type: 예외
+    applies_to: [cash_like_holding, Holding.component_name]
+    when: 구성종목을 세거나 비교한다.
+    then: glossary cash_like_holding의 현금성 항목은 구성종목에서 뺀다.
+    evidence: [P-CASH]
+    motivated_by: [C4-02, C4-06]
+
+  - id: R-holding-set-logic
+    type: 계산
+    applies_to: [Holding, holding]
+    when: 여러 종목을 '모두' 담은 ETF나 두 ETF 구성종목의 공통·차이를 묻는다.
+    then: ETF마다 구성종목명 집합을 만들고 집합 연산으로 답한다. '모두 담은'은 요청한 종목이 전부 들어 있는 ETF만이고, 하나라도 담은 ETF를 세지 않는다. 차이는 한쪽 집합에만 있는 종목명이다.
+    depends_on: [R-cash-exclusion]
+    evidence: [P-NAME, P-CASH]
+    motivated_by: [C4-03, C4-06]

@@ -1,0 +1,238 @@
+# 검토 기록: 사람이 결정한 내용과 이유만 남긴다(초안 전체는 저장하지 않는다, 책 4-4)
+# - decisions.type: merge / drop / reverse / derive / demote / keep_low_confidence
+# - conflicts: 근거 자료끼리 어긋난 항목과 따른 쪽(우선순위: design.md > 데이터 > schema_catalog > questions_v2 > legacy)
+# - profiling: 읽기 전용 계정으로 한 번 실행한 데이터 확인 기록(2026-10-18, 데이터 기준일 2026-08-21). 테스트가 아니다.
+# - open_questions: 사용자 확인이 필요한 것. resolved가 있으면 결정이 난 것이다
+
+decisions:
+  - id: merge-on-sale
+    type: merge
+    target: on_sale
+    decision: 판매중·판매 가능·살 수 있는·매수 가능을 용어 하나로 합치고, 테이블별 판정은 R-sale-* 규칙 네 개로 나눈다.
+    reason: 같은 업무 개념인데 테이블마다 판정 컬럼만 다르다. 용어를 테이블별로 나누면 동의어가 별개 개념이 된다.
+    evidence: [P-SALE, 'profiling:sale_status']
+
+  - id: merge-bond-row
+    type: merge
+    target: BondLot
+    decision: 계획 초안의 BondOffer(판매 LOT)를 채권 행 전체를 뜻하는 BondLot으로 바꾼다. 판매 LOT은 매매단가가 있는 BondLot이다.
+    reason: 1행은 판매 LOT만이 아니라 장내 시세 행도 포함한다. 판매 LOT을 별도 하위 개념으로 두어도 답이 달라지는 문항이 없다(판매 여부는 R-sale-bond가 가른다).
+    evidence: ['profiling:bond_grain', 'profiling:bond_sale_lot']
+
+  - id: derive-fund
+    type: derive
+    target: Fund
+    decision: 대표펀드는 저장된 행이 아니라 대표예탁원종목번호로 묶은 파생 단위로 두고, class_of_fund도 파생 관계로 둔다.
+    reason: 펀드 테이블에 대표펀드 행은 없다. 조건은 클래스에 먼저 걸고 묶어야 판매 상태가 섞인 대표펀드를 바르게 다룬다.
+    evidence: [P-UNIT, 'profiling:fund_grain']
+
+  - id: derive-issuer
+    type: derive
+    target: Issuer
+    decision: 발행기관은 발행기관명 문자열에서 파생한 개념으로 둔다.
+    reason: 발행기관 테이블이 없고 이름 문자열로만 존재한다.
+    evidence: ['profiling:issuer_names']
+
+  - id: drop-inverse-term
+    type: drop
+    target: 인버스
+    decision: 인버스 용어와 규칙을 만들지 않고 leverage의 혼동어로만 둔다.
+    reason: 골든 문항이 요구하지 않는다. 국내 상장상품의 배수 부호가 방향을 나타내지 않아 정의를 데이터로 뒷받침할 수 없다.
+    evidence: ['profiling:leverage_factor']
+
+  - id: drop-p-tie
+    type: drop
+    target: P-TIE
+    decision: Top-N 동률 정책은 rules에 넣지 않는다.
+    reason: 채점기가 대체 정답을 받는 정책이라 에이전트가 쓸 업무 지식이 아니다.
+    evidence: [P-TIE]
+
+  - id: drop-null-group-key
+    type: drop
+    target: 그룹 키 결측 처리
+    decision: 그룹 집계에서 그룹 키가 비어 있는 행을 어떻게 할지는 규칙으로 두지 않는다.
+    reason: 그룹 키 결측이 답을 가르는 문항이 없다(발행기관별 등급 집계 대상에 등급 결측이 없었다). 근거 없이 규칙을 만들지 않는다.
+    evidence: ['profiling:bond_rating_null']
+
+  - id: demote-fund-fee
+    type: demote
+    target: fee_rate
+    decision: 펀드 보수 컬럼(집합투자업자보수 등)은 fee_rate의 정본에서 뺀다.
+    reason: 단위가 확인되지 않았다(design.md 7절). 판매중 공모 클래스의 운용보수 중앙값이 4.5라 % 단위로 볼 수 없다.
+    evidence: ['design§7:펀드 보수 단위 불명', 'profiling:zero_values']
+
+  - id: demote-domestic-aum
+    type: demote
+    target: DomesticListedProduct.du_last_aum
+    decision: 국내 상장상품의 최종AUM은 순자산의 정본이 아니라 혼동어로 둔다.
+    reason: 순자산총액과 값이 같은 행이 없고 ETN은 0이다. 순자산 문항의 정답은 순자산총액을 쓴다.
+    evidence: ['profiling:net_assets']
+
+  - id: demote-cash-subtype
+    type: demote
+    target: cash_like_holding
+    decision: 현금성 항목을 Holding의 하위 개념으로 두지 않고 값 집합 용어로 둔다.
+    reason: 구성종목명 값 다섯 개로 정해지는 집합이라 하위 개념을 두면 과세분화가 된다.
+    evidence: [P-CASH]
+
+  - id: keep-p-cash-list
+    type: keep_low_confidence
+    target: cash_like_holding
+    decision: 현금성 항목은 design.md P-CASH의 다섯 값만 둔다.
+    reason: 데이터에는 '현금', 'USD현금', '[USD] 예금' 같은 비슷한 항목이 더 있지만 정책이 정한 목록을 따른다. 넓힐지는 사용자가 정한다.
+    evidence: [P-CASH, 'profiling:cash_names']
+
+  - id: keep-overseas-leverage-null
+    type: keep_low_confidence
+    target: OverseasListedProduct.cu_lev_fector
+    decision: 해외 상장상품 배수 결측은 '배수 표기 없음(대부분 1배로 보이나 미확인)'으로 둔다.
+    reason: 85%가 비어 있고, 이름에 Ultra·2x·3x가 들어간 상품 887개 중 75개도 비어 있다. 결측을 1배로 단정할 수 없다.
+    evidence: ['profiling:leverage_factor']
+
+  - id: keep-bond-sale-count-exception
+    type: keep_low_confidence
+    target: R-bond-unit-sale-count
+    decision: 판매 가능 채권 개수는 판매 건 기준이라는 예외를 정책대로 둔다.
+    reason: 현재 데이터에서는 매수 가능한 LOT가 종목당 1행이라 건 기준과 종목 기준의 결과가 같다. 데이터가 바뀌면 답이 달라질 수 있어 예외를 남긴다.
+    evidence: [P-UNIT, 'profiling:bond_sale_lot']
+
+conflicts:
+  - id: conflict-overseas-zero-fee
+    sources: [design.md P-ZERO, domain_rules_legacy.md]
+    legacy_said: 해외 보수 0은 미입력이라 보수 비교에서 뺀다.
+    followed: design.md. 해외 상장상품 보수 0은 실제 값으로 포함한다.
+    applied_in: [OverseasListedProduct.cu_charge_rt, R-zero-is-value]
+  - id: conflict-bond-sale
+    sources: [design.md P-SALE·G1, domain_rules_legacy.md]
+    legacy_said: 당사 판매(매수 가능) 채권은 매매단가가 있는 행이다.
+    followed: design.md. 매수가능수량이 0보다 큰 LOT만 판매 가능이다.
+    applied_in: [R-sale-bond, on_sale]
+  - id: conflict-default-scope
+    sources: [design.md P-SCOPE, domain_rules_legacy.md]
+    legacy_said: 따로 말하지 않으면 판매·거래 가능한 상품만 대상으로 한다.
+    followed: design.md. 판매 표현이 있을 때만 판매 조건을 건다.
+    applied_in: [R-scope-default]
+  - id: conflict-name-match
+    sources: [design.md P-NAME, domain_rules_legacy.md]
+    legacy_said: 상품명은 부분 일치로 검색한다.
+    followed: design.md. 정확히 일치가 기본이고, 부분 일치는 원문 이름을 찾는 탐색에만 쓴다.
+    applied_in: [R-name-exact, R-name-resolve]
+  - id: conflict-fund-type
+    sources: [design.md G2, domain_rules_legacy.md]
+    legacy_said: 펀드 유형은 제로인 대유형 또는 운용속성으로 본다.
+    followed: design.md. 제로인 대유형이 정본이고 운용속성은 혼동어다.
+    applied_in: [fund_type, mmf]
+  - id: conflict-fund-fee
+    sources: [design.md 7절, domain_rules_legacy.md]
+    legacy_said: 펀드 총보수는 보수 컬럼 네 개의 합(%)이다.
+    followed: design.md. 단위가 확인되지 않아 정본에 넣지 않는다.
+    applied_in: [fee_rate]
+  - id: conflict-overseas-amount-unit
+    sources: [design.md P-UNITS, 실제 데이터]
+    legacy_said: (design.md 원문) 금액은 원 단위다.
+    followed: 데이터. 상장주식수 × 종가(USD)가 일간 순자산총액과 같은 규모라 해외 상장상품 금액은 USD다. 2026-10-18 사용자 승인으로 design.md P-UNITS에 해외 금액 USD를 추가했다.
+    applied_in: [OverseasListedProduct.du_last_aum, net_assets]
+
+profiling:
+  - id: bond_grain
+    checked: 채권 테이블 1행의 유일키와 종목 속성의 일관성
+    result: (종목번호, 거래구분, LOT 순번) 조합 21,882개가 행 수와 같다. 종목번호는 20,497개이고 종목당 1~4행이다. 표면이자율·신용등급·발행기관·상환일이 행마다 다른 종목은 0개, 위험등급은 8개, 채권명은 2개다.
+    used_by: [Bond, BondLot, R-bond-unit-item]
+  - id: bond_sale_lot
+    checked: 채권 판매 물량과 매수 가능 수량
+    result: 매매단가가 있는 행은 634행이고 모두 장외다. 이 중 338행은 매수가능수량 0이다. 매수가능수량이 있는 296행은 종목 296개로 종목당 1행이다. LOT 순번 2·3인 행은 모두 수량 0이다.
+    used_by: [R-sale-bond, R-bond-unit-sale-count, BondLot.buyable_quantity]
+  - id: bond_rating_null
+    checked: 신용등급 결측 분포
+    result: 결측 4,020행 중 국공채가 2,840행이며 국공채는 전부 결측이다. 나머지는 일반사채·공사채 등이다. 발행기관별 등급 집계 문항의 대상 기관은 등급 결측이 없다.
+    used_by: [Bond.crd_grd, drop-null-group-key]
+  - id: fund_grain
+    checked: 펀드 테이블 1행 단위와 대표펀드 묶음
+    result: 종목번호 23,676개가 행 수와 같다. 대표예탁원종목번호는 6,885개이고 대표펀드 하나에 클래스 1~수십 개가 있다. 판매중·판매완료 클래스가 섞인 대표펀드가 96개, 제로인 대유형이 섞인 대표펀드가 16개다.
+    used_by: [FundClass, Fund, R-fund-unit-representative]
+  - id: private_fund_attributes
+    checked: 사모 클래스의 속성 결측
+    result: 사모 8,960행 중 제로인 대유형 15행, 1년 수익률 1행, 위험등급 1행, 순자산 8행만 값이 있다.
+    used_by: [public_offering, FundClass.zrin_btyp_nm]
+  - id: sale_status
+    checked: 테이블별 판매 여부 값 분포
+    result: 국내 상장상품 '1' 1,534 / '0' 246(그중 242는 거래종료일 경과). 해외 상장상품 '1' 6,023 / NULL 14. 펀드 판매중 10,962 / 판매완료 12,714이며 당사판매여부 Y는 판매중 8,550·판매완료 2,047. 채권은 판매 여부 컬럼이 없고 매수가능수량으로 판정한다.
+    used_by: [on_sale, R-sale-domestic-listed, R-sale-overseas-listed, R-sale-fund, R-sale-bond]
+  - id: zero_values
+    checked: 0이 실제 값인지 미입력인지
+    result: 국내 총보수는 값이 있는 ETF 217개 중 150개가 '0'이고 ETN은 전부 NULL이다. 해외 보수 0은 ETF 368개·ETN 51개다. 유통순자산총액 0은 ETN 422개 전부·ETF 507개다. 국내 최종AUM 0은 ETN 전부·ETF 6개다. 표면이자율 0은 이표채 499행·복리채 57행·할인채 21행 등이다. 판매중 공모 클래스의 운용보수 중앙값은 4.5다.
+    used_by: [R-zero-missing, R-zero-is-value, DomesticListedProduct.cu_charge_rt, DomesticListedProduct.pd_circ_net_tamt, Bond.srfc_irt, demote-fund-fee]
+  - id: net_assets
+    checked: 순자산 후보 컬럼끼리 비교
+    result: 국내 순자산총액과 유통순자산총액, 순자산총액과 최종AUM이 같은 행은 0개다. 국내 채권형 ETF의 순자산 순위와 유통순자산 순위가 다르다. 해외 일간 순자산총액은 상장주식수 × 종가(USD)와 같은 규모다. 펀드 순자산은 같은 대표펀드 안에서도 클래스마다 다르다.
+    used_by: [net_assets, demote-domestic-aum, conflict-overseas-amount-unit, FundClass.fd_nast_suma]
+  - id: leverage_factor
+    checked: 배수 값과 상품 이름의 대응
+    result: 국내 ETF 배수는 '1'·'2'·'-1'·결측이고, 이름에 '인버스'가 있는 ETF 46개 중 '-1'은 1개다. 국내 ETN은 '-2' 16개 외에 이름에 '인버스'가 있는데 '2'로 적힌 것이 81개이고 배수 결측이 123개다. 해외는 85%가 결측이고 음수 배수는 인버스·숏 여부 Y와 대체로 일치한다.
+    used_by: [leverage, R-leverage, drop-inverse-term, keep-overseas-leverage-null]
+  - id: risk_grade
+    checked: 테이블별 위험등급 표기
+    result: 국내 상장상품과 채권은 '매우높은위험(1등급)'~'매우낮은위험(6등급)'(채권은 '해당없음' 추가), 펀드는 코드 1~6과 '매우 높은 위험'~'매우 낮은 위험'이며 코드 2·4에 띄어쓰기 없는 변형('높은위험', '보통위험')이 섞여 있다.
+    used_by: [risk_grade, R-risk-grade-order]
+  - id: issuer_names
+    checked: 발행기관명 표기
+    result: 발행기관명 1,818개 중 '(주)'로 시작하는 행 3,403·끝나는 행 8,777·'(유)'가 들어간 행 921이다. 은행·공사 이름은 '(주)○○은행', '○○공사(주)', '한국○○공사'처럼 법인 표기 위치가 일정하지 않다.
+    used_by: [issuer, R-name-resolve]
+  - id: holding_duplicates
+    checked: 구성종목 등재 중복
+    result: 76,504행 중 (ETF 상품번호, 구성종목명) 조합은 75,898개다. 연결된 상품 1,226개는 모두 국내 ETF다.
+    used_by: [Holding, R-holding-etf-count, etf_holds]
+  - id: holding_name_case
+    checked: 구성종목명의 대소문자 표기 변형
+    result: 소문자로 바꾸면 같아지는데 원문 표기가 둘 이상인 구성종목명이 987개이고 대부분 해외 주식 영문명이다. 같은 ETF 안에서 같은 종목명이 여러 행인 경우는 182건이다.
+    used_by: [holding, R-holding-etf-count]
+  - id: cash_names
+    checked: 현금성으로 보이는 구성종목명
+    result: P-CASH 다섯 값(원화예금 616, 설정현금액 368, 원화현금 283, 현금성자산 97, 100%현금설정액 51행)이 모두 있다. 그 밖에 '현금' 103, 'USD현금' 18, '[USD] 예금' 18행 등이 있다.
+    verified_values:
+      Holding.component_name: [원화예금, 설정현금액, 원화현금, 현금성자산, 100%현금설정액]
+    used_by: [cash_like_holding, keep-p-cash-list]
+  - id: mmf_currency
+    checked: MMF 유형의 통화
+    result: 제로인 대유형 MMF 218개는 모두 KRW, 외화 MMF 30개는 모두 USD다.
+    used_by: [mmf]
+
+open_questions:
+  - id: q-cash-list
+    question: 현금성 항목에 '현금', 'USD현금', '[USD] 예금'을 더할까요(P-CASH 변경, 골든 정답이 바뀔 수 있음)?
+    related: [keep-p-cash-list]
+    resolved: 2026-10-18 현행 유지. 골든 정답이 바뀌면 기준선과 비교할 수 없으므로 문항을 80~120개로 늘리는 v3에서 P-CASH 개정과 함께 다시 본다.
+  - id: q-overseas-leverage-null
+    question: 해외 상장상품 배수 결측을 레버리지 판정에서 '1배'로 볼까요, 결측으로 뺄까요?
+    related: [keep-overseas-leverage-null]
+    resolved: 2026-10-18 규칙을 만들지 않고 미확인으로 둔다. 이 지식을 요구하는 문항이 없다. 질문이 생기면 상품명 패턴과 함께 데이터로 검증해 규칙을 만든다.
+
+reviews:
+  - date: 2026-10-18
+    scope: model.yaml 전체
+    result: 승인
+    notes: 열린 질문 셋 중 해외 금액 단위만 반영(P-UNITS 수정), 현금성 목록·해외 배수 결측은 현행 유지.
+  - date: 2026-10-18
+    scope: 채권 glossary·rules (bond_item, credit_rating, krw_currency, maturity, bond_classification, coupon_rate, after_tax_yield, issuer / R-sale-bond, R-bond-unit-item, R-bond-unit-sale-count, R-bond-item-best-lot, R-credit-grade-order, R-period-window)
+    result: 승인
+    notes: R-period-window는 P-DATE대로 상한만 둔다. 기준일 전에 만기가 지난 종목(11개)을 빼는 하한은 추가하지 않는다.
+  - date: 2026-10-18
+    scope: 펀드 glossary·rules (fund_class, representative_fund, public_offering, fund_type, domestic_fund_type, mmf, sales_channel, front_load_fee / R-sale-fund, R-fund-unit-class, R-fund-unit-representative)
+    result: 승인
+    notes: 국내○○형은 해외 접두어가 없는 주식형·채권형·주식혼합형·채권혼합형 넷만 둔다. 공모는 질문에 있을 때만 건다(P-SCOPE). 대표펀드 순자산(클래스 합산 여부)은 요구 문항이 없어 정하지 않는다.
+  - date: 2026-10-18
+    scope: 국내 ETF·ETN glossary·rules (etf, etn, etp, asset_class, investment_region, pension_eligible, distribution_cycle, leverage / R-sale-domestic-listed, R-product-group, R-zero-missing, R-text-numeric, R-leverage, R-ratio-denominator)
+    result: 승인
+    notes: R-zero-missing을 유통순자산총액·최종AUM의 0까지 넓힌 것을 유지한다. 레버리지는 배수 1 초과 정의를 그대로 두고, 인버스 2배 상품이 섞인다는 점을 leverage note에 적는다(골든 정답 유지). 투자지역은 국내 테이블에만 둔다.
+  - date: 2026-10-18
+    scope: 해외 ETF·ETN rules (R-sale-overseas-listed, R-zero-is-value, R-cross-table-compare)
+    result: 승인
+    notes: R-zero-is-value에 채권 표면이자율을 함께 두어 '0은 기본적으로 실제 값이고 예외는 속성 정의에 적는다'는 원칙을 유지한다.
+  - date: 2026-10-18
+    scope: 구성종목 glossary·rules (holding, cash_like_holding / R-holding-etf-count, R-holding-component-count, R-cash-exclusion, R-holding-set-logic)
+    result: 승인
+    notes: 영문 종목명 대소문자 변형은 규칙을 만들지 않고 holding note에만 적는다. 대소문자 무시 비교는 P-NAME 변경이고 근거 문항이 없다.
+  - date: 2026-10-18
+    scope: 공통 glossary·rules (on_sale, as_of_date, net_assets, fee_rate, period_return, risk_grade, product_name, holding_weight, corporate_group, future_return / R-scope-default, R-null-exclude, R-topn-nulls, R-units, R-outlier-raw, R-as-of-date, R-risk-grade-order, R-name-exact, R-name-resolve, R-oos-refusal)
+    result: 승인
+    notes: R-name-resolve는 부분 일치를 원문 이름 탐색에만 쓰고 집계는 정확히 일치로 한다. 결측 공개 기준은 P-NULL대로 10%다. 기준일은 규칙에 상수로 둔다. 이 검토로 5단계 검토를 모두 마쳤다.

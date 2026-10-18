@@ -22,6 +22,8 @@ uv run pytest -m "not db"                                # skip tests that need 
 uv run pytest tests/test_sql_guard.py::test_allows_select
 uv run python scripts/build_schema_cache.py              # regenerate data/schema_catalog.json after DB data changes
 uv run python scripts/verify_golden.py                   # rerun gold SQL → golden/gold_results_v2.json, review_sheet.md
+uv run python scripts/verify_golden.py --questions golden/holdout_v1.yaml --out golden/gold_results_holdout_v1.json   # holdout gold (no review_sheet)
+uv run pytest tests/test_ontology.py                     # ontology YAML structure/existence/leak/coverage checks, no DB/LLM
 uv run python scripts/eval_golden.py --label base [--check] [--runs 3] [--only C1-01,C4-06]   # score agent on golden v2
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]   # rescore without DB/LLM against the current golden version
 uv run python scripts/eval_golden.py --compare base check                                    # per-question table across labels
@@ -69,3 +71,15 @@ Scoring (`src/portfolio_agent/golden_eval.py`, pure functions, unit-tested in `t
 - **`correct`:** C1–C5 require exec match, `answer_ok` not false, and all mentions. C6 requires refusal keywords and no forbidden hits. Failures get one `fail_reason`.
 
 Outputs go to `data/golden_runs/` (gitignored). When changing prompts or `domain_rules.md`, rerun the eval (or `--only` the affected ids). After changing scoring rules, use `--rescore` instead of rerunning the agent.
+
+**Holdout:** `golden/holdout_v1.yaml` has 14 items (H-01…H-14) in the same format plus `tests_knowledge`. They ask the same knowledge as golden in different contexts. They were frozen before the ontology was written, so don't edit them; bump to `holdout_v2` instead.
+
+## Ontology
+
+`ontology/` holds data-external definitions extracted from the golden set (book 『온톨로지 따라하기』 ch. 4–5). It is not wired into the agent yet (no prompt rendering, no PostgreSQL load).
+- `model.yaml`: concepts (table, grain, identity, parent/discriminator, attributes with `missing_means`/`zero_means`) and relations (`via`, cardinality, `derived`).
+- `glossary.yaml`: term → `canonical` (`Concept`, `Concept.column`, or `{ref, values}`), `surface_forms` (synonyms) vs `confusable_with` (different things), `in_data: false` for concepts the data lacks.
+- `rules.yaml`: `R-*` rules with `type` 조건/시점/예외/계산, `applies_to`, `when`/`then`, `overrides`, `depends_on`, `disclose`, `evidence`.
+- `review_log.yaml`: human decisions (merge/drop/derive/demote/keep_low_confidence), source conflicts, one-off read-only profiling results, open questions, review approvals.
+- Every item has `motivated_by` (golden ids, trace only; drop it when rendering). Definitions must be general concepts, not per-question facts; question ids, golden proper nouns outside `examples`, holdout proper nouns, and copied gold SQL predicates are lint failures in `tests/test_ontology.py`. Its `HOLDOUT_COVERAGE` maps each holdout `tests_knowledge` line to the items that resolve it.
+- Source priority when definitions conflict: `golden/design.md` policies/decisions > actual data > `schema_catalog.json` > `questions_v2.yaml` notes > `domain_rules_legacy.md`. When policies or gold change, update the matching ontology items and `review_log.yaml`.

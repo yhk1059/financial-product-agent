@@ -1,0 +1,516 @@
+# 의미 모델: 개념(테이블·1행 단위·식별키·하위유형·속성)과 관계
+# - "무엇이 있는가"만 적는다. 고르는 방법·계산·예외는 rules.yaml에 둔다.
+# - 0·NULL의 뜻은 속성의 missing_means·zero_means에 둔다. 집계에서 빼는 처리는 rules.yaml에 둔다.
+# - motivated_by는 추적용 메타데이터다(근거가 된 골든 문항 id). 프롬프트로 렌더링할 때는 뺀다.
+# - generalized_from이 있는 항목은 문항이 직접 요구한 범위보다 넓힌 것이고, 데이터 확인 기록은 review_log.yaml profiling에 있다.
+# - 근거 우선순위: golden/design.md 정책·결정 > 실제 데이터 > schema_catalog.json > questions_v2.yaml 해석 > domain_rules_legacy.md
+
+concepts:
+  # ───────────────────────── 국내 상장상품 ─────────────────────────
+  - id: DomesticListedProduct
+    label: 국내 상장상품
+    definition: 국내 거래소에 상장된 ETF와 ETN을 한 행에 하나씩 담은 상품이다.
+    table: pref01n001
+    grain: 상장상품 1개
+    identity: [pd_itm_no]
+    discriminator: pd_grp_no
+    motivated_by: [C1-03, C1-04, C2-01, C2-06, C3-01, C3-05, C5-01]
+    attributes:
+      - column: pd_itm_no
+        label: 상품번호
+        definition: 국내 상장상품을 유일하게 가리키는 표준코드이며 구성종목 테이블이 이 값으로 연결된다.
+        type: text
+        motivated_by: [C4-01, C4-02]
+      - column: pd_abrv_nm
+        label: 상품약어명
+        definition: 브랜드와 전략을 붙여 시장에서 부르는 짧은 상품 이름이다.
+        type: text
+        motivated_by: [C3-01, C4-02, C4-06]
+      - column: pd_nm
+        label: 정식 상품명
+        definition: 운용사·법적 형식을 포함한 신탁·증권의 정식 명칭이다.
+        type: text
+        motivated_by: [C4-02, C4-06]
+      - column: pd_grp_no
+        label: 상품군종류
+        definition: 상장상품이 ETF인지 ETN인지를 나타내는 구분값이다.
+        type: text
+        motivated_by: [C1-03, C2-01, C2-06]
+      - column: pd_sale_yn
+        label: 상품판매여부
+        definition: 당사가 현재 이 상장상품을 판매하는지를 '1'(판매)과 '0'(미판매)으로 나타낸다.
+        type: text
+        motivated_by: [C1-01]
+        generalized_from: 펀드·채권의 판매 가능 개념
+      - column: pd_pen_tr_yn
+        label: 연금거래가능여부
+        definition: 연금계좌에서 이 상장상품을 매수할 수 있는지를 Y/N으로 나타낸다.
+        type: text
+        motivated_by: [C1-03]
+      - column: wu_inv_ast_type
+        label: 투자자산군
+        definition: 상장상품이 주로 투자하는 자산의 종류를 한글 값(주식, 채권, 원자재 등)으로 나타낸다.
+        type: text
+        motivated_by: [C1-03, C2-01, C3-01]
+      - column: wu_inv_rgn
+        label: 투자지역
+        definition: 상장상품이 투자하는 지역(국내, 미국, 글로벌 등)이다.
+        type: text
+        motivated_by: [C1-03, C3-01]
+      - column: cu_charge_rt
+        label: 총보수요율
+        definition: 상장상품의 연간 총보수를 % 숫자로 적은 값이다.
+        type: text(숫자)
+        unit: '%'
+        missing_means: 보수 정보 미수집(ETF 대부분, ETN 전부)
+        zero_means: 미입력(실제 보수가 0이라는 뜻이 아니다)
+        motivated_by: [C3-05, C5-01]
+      - column: cu_lev_fector
+        label: 배수
+        definition: 상장상품이 기초자산 일간 수익률의 몇 배를 추종하는지 나타내는 값이다.
+        type: text(숫자)
+        missing_means: 배수 정보 미수집
+        note: 부호가 방향(인버스)을 일관되게 나타내지 않는다. 인버스 상품도 크기만 적힌 경우가 많다.
+        motivated_by: [C2-06]
+      - column: pd_net_tamt
+        label: 순자산총액
+        definition: 상장상품이 보유한 순자산의 총액이다.
+        type: numeric
+        unit: 원
+        motivated_by: [C4-01]
+      - column: pd_circ_net_tamt
+        label: 유통순자산총액
+        definition: 순자산 중 시장에 유통되는 증권분에 해당하는 금액이다.
+        type: numeric
+        unit: 원
+        zero_means: 미산출(ETN은 전부 0이고 ETF도 상당수가 0이라 실제 규모가 아니다)
+        motivated_by: [C4-01]
+      - column: du_last_aum
+        label: 최종AUM
+        definition: 일간 갱신 원천에서 가져온 운용자산 규모다.
+        type: numeric
+        unit: 원
+        zero_means: 미산출(ETN은 전부 0)
+        motivated_by: [C4-01]
+        generalized_from: 해외 상장상품의 일간 순자산총액
+      - column: du_er_1y
+        label: 1년 수익률
+        definition: 기준일까지 최근 1년 동안의 가격 수익률이다.
+        type: numeric
+        unit: '%'
+        missing_means: 상장 1년 미만이거나 미산출
+        motivated_by: [C3-01]
+      - column: pd_dvid_cycl
+        label: 분배주기
+        definition: 분배금을 주는 주기를 코드(A 연, S 반기, Q 분기, M 월)로 나타낸다.
+        type: text
+        missing_means: 분배정보 없음
+        motivated_by: [C1-04]
+      - column: pd_dvid_yield
+        label: 연환산 분배수익률
+        definition: 최근 분배금을 1년 기준으로 환산해 기준 NAV로 나눈 수익률이다.
+        type: numeric
+        unit: '%'
+        missing_means: 분배정보 없음
+        motivated_by: [C1-04]
+      - column: pd_risk_nm
+        label: 상품위험등급명
+        definition: 판매사가 매긴 투자위험등급을 '○○위험(n등급)' 형식으로 나타낸다.
+        type: text
+        motivated_by: [C1-07]
+        generalized_from: 펀드의 제로인 투자위험등급
+
+  - id: DomesticEtf
+    label: 국내 ETF
+    definition: 국내 상장상품 중 상품군종류가 ETF인 상장지수펀드다.
+    parent: DomesticListedProduct
+    table: pref01n001
+    discriminator_value: ETF
+    motivated_by: [C1-03, C2-01, C3-01, C3-05, C4-01]
+
+  - id: DomesticEtn
+    label: 국내 ETN
+    definition: 국내 상장상품 중 상품군종류가 ETN인 상장지수증권이다.
+    parent: DomesticListedProduct
+    table: pref01n001
+    discriminator_value: ETN
+    motivated_by: [C2-06]
+
+  # ───────────────────────── 해외 상장상품 ─────────────────────────
+  - id: OverseasListedProduct
+    label: 해외 상장상품
+    definition: 미국 거래소에 상장된 ETF와 ETN을 한 행에 하나씩 담은 상품이다.
+    table: pref02n001
+    grain: 상장상품 1개
+    identity: [pd_itm_no]
+    discriminator: pd_grp_no
+    motivated_by: [C1-05, C2-04, C3-02, C5-01]
+    attributes:
+      - column: pd_itm_no
+        label: RIC
+        definition: 해외 상장상품을 유일하게 가리키는 Refinitiv 코드다.
+        type: text
+        motivated_by: [C3-02]
+      - column: pd_abrv_nm
+        label: 티커
+        definition: 거래소에서 쓰는 해외 상장상품의 티커다.
+        type: text
+        motivated_by: [C3-02]
+      - column: pd_nm
+        label: 상품명
+        definition: 해외 상장상품의 영문 정식 명칭이다.
+        type: text
+        motivated_by: [C3-02]
+      - column: pd_grp_no
+        label: 상품군종류
+        definition: 해외 상장상품이 ETF인지 ETN인지를 나타내는 구분값이다.
+        type: text
+        motivated_by: [C1-05, C2-04]
+      - column: cu_etn_yn
+        label: ETN 여부
+        definition: ETN인 상품에만 Y가 적힌 표시값이다.
+        type: text
+        missing_means: ETN이 아님(ETF 행은 'N'이 아니라 비어 있다)
+        motivated_by: [C2-04]
+      - column: pd_sale_yn
+        label: 판매여부
+        definition: 당사가 현재 이 해외 상장상품을 판매하는지를 '1'로 나타낸다.
+        type: text
+        missing_means: 판매 정보 없음(극소수)
+        motivated_by: [C1-01]
+        generalized_from: 펀드·채권의 판매 가능 개념
+      - column: wu_inv_ast_type
+        label: 투자자산군
+        definition: 해외 상장상품이 주로 투자하는 자산의 종류를 영문 값(Equity, Bond 등)으로 나타낸다.
+        type: text
+        motivated_by: [C1-05, C3-02]
+      - column: cu_charge_rt
+        label: 연간보수율
+        definition: 해외 상장상품의 연간 보수를 % 숫자로 적은 값이다.
+        type: numeric
+        unit: '%'
+        zero_means: 실제 보수 0(무보수 상품으로 보고 집계에 넣는다)
+        motivated_by: [C1-05, C2-04, C5-01]
+      - column: du_last_aum
+        label: 일간 순자산총액
+        definition: 해외 상장상품의 일간 순자산 규모다.
+        type: numeric
+        unit: USD
+        motivated_by: [C3-02]
+      - column: cu_lev_fector
+        label: 배수
+        definition: 해외 상장상품이 기초자산 일간 수익률의 몇 배를 추종하는지 나타내는 값이며 음수는 반대 방향이다.
+        type: numeric
+        missing_means: 배수 표기가 없는 상품(대부분 일반 1배로 보이나 확인되지 않음)
+        motivated_by: [C2-06]
+        generalized_from: 국내 상장상품의 배수
+
+  - id: OverseasEtf
+    label: 해외 ETF
+    definition: 해외 상장상품 중 상품군종류가 ETF인 상장지수펀드다.
+    parent: OverseasListedProduct
+    table: pref02n001
+    discriminator_value: ETF
+    motivated_by: [C1-05, C2-04, C3-02, C5-01]
+
+  - id: OverseasEtn
+    label: 해외 ETN
+    definition: 해외 상장상품 중 상품군종류가 ETN인 상장지수증권이다.
+    parent: OverseasListedProduct
+    table: pref02n001
+    discriminator_value: ETN
+    motivated_by: [C2-04]
+    generalized_from: 국내 ETN
+
+  # ───────────────────────── 펀드 ─────────────────────────
+  - id: FundClass
+    label: 펀드 클래스
+    definition: 같은 펀드를 수수료·판매채널·투자자 조건에 따라 나눈 판매 단위 하나다.
+    table: prfd01n001
+    grain: 클래스 1개
+    identity: [itm_no]
+    motivated_by: [C1-06, C1-07, C2-02, C2-05, C3-04, C4-04, C5-02]
+    attributes:
+      - column: itm_no
+        label: 종목번호
+        definition: 펀드 클래스를 유일하게 가리키는 표준코드다.
+        type: text
+        motivated_by: [C3-04]
+      - column: itm_nm
+        label: 종목명
+        definition: 클래스 표기(A, C-e 등)까지 붙은 펀드 클래스의 이름이다.
+        type: text
+        motivated_by: [C3-04]
+      - column: rptt_ksd_itm_no
+        label: 대표예탁원종목번호
+        definition: 여러 클래스가 공유하는 대표펀드의 예탁원 코드다.
+        type: text
+        missing_means: 대표펀드 미연결(공모 판매중 클래스의 일부)
+        motivated_by: [C4-04]
+      - column: sale_yn
+        label: 판매여부
+        definition: 이 클래스가 현재 판매중인지 판매가 끝났는지를 '판매중'과 '판매완료'로 나타낸다.
+        type: text
+        motivated_by: [C1-06, C1-07, C2-02, C2-05, C3-04, C4-04, C5-02]
+      - column: thco_sale_yn
+        label: 당사판매여부
+        definition: 당사가 이 클래스를 취급한 적이 있는지를 Y로만 표시한 값이다.
+        type: text
+        missing_means: 표시 없음(판매중 클래스에도 비어 있는 경우가 많다)
+        motivated_by: [C2-05]
+      - column: prvo_pbff_desc
+        label: 공모/사모 구분
+        definition: 펀드 클래스가 공모인지 사모인지를 나타낸다.
+        type: text
+        motivated_by: [C1-06, C1-07, C2-02, C2-05, C4-04]
+      - column: zrin_btyp_nm
+        label: 제로인 대유형명
+        definition: 제로인 분류 체계에서 펀드가 속한 대유형(주식형, 해외주식형, 채권형, MMF 등)이다.
+        type: text
+        missing_means: 제로인 분류 없음(사모 클래스는 사실상 전부 비어 있다)
+        motivated_by: [C1-06, C1-07, C2-02, C2-05, C3-04, C5-02]
+      - column: or_attr_desc
+        label: 운용속성
+        definition: 운용 방식에 따른 속성 구분(주식형, 채권형, 재간접, MMF 등)으로 국내·해외를 나누지 않는다.
+        type: text
+        motivated_by: [C1-07, C2-05, C5-02]
+      - column: zrin_fd_ivst_risk_grd_nm
+        label: 제로인 투자위험등급명
+        definition: 제로인이 매긴 6단계 투자위험등급의 이름이다.
+        type: text
+        missing_means: 위험등급 미부여
+        note: 같은 등급에 '높은 위험'과 '높은위험'처럼 띄어쓰기만 다른 값이 섞여 있다.
+        motivated_by: [C1-07]
+      - column: zrin_fd_ivst_risk_gcd
+        label: 제로인 투자위험등급코드
+        definition: 제로인 투자위험등급을 1(매우 높은 위험)부터 6(매우 낮은 위험)까지 숫자로 나타낸 코드다.
+        type: text
+        missing_means: 위험등급 미부여
+        motivated_by: [C1-07]
+        generalized_from: 위험등급 이름의 순서
+      - column: fd_yr1_ern_r
+        label: 1년 수익률
+        definition: 기준일까지 최근 1년 동안의 클래스 수익률이다.
+        type: numeric
+        unit: '%'
+        missing_means: 설정 1년 미만이거나 수익률 미제공(공모 클래스도 절반 이상 비어 있다)
+        motivated_by: [C1-07, C2-02, C5-02]
+      - column: fd_yr3_ern_r
+        label: 3년 수익률
+        definition: 기준일까지 최근 3년 동안의 클래스 수익률이다.
+        type: numeric
+        unit: '%'
+        missing_means: 설정 3년 미만이거나 수익률 미제공
+        motivated_by: [C3-04]
+      - column: fd_nast_suma
+        label: 펀드 순자산
+        definition: 클래스 하나의 순자산 금액이다.
+        type: numeric
+        unit: 원
+        missing_means: 순자산 미제공(사모 클래스는 사실상 전부 비어 있다)
+        motivated_by: [C2-05]
+        generalized_from: 상장상품의 순자산
+      - column: han_clas_sales_channel
+        label: 클래스 판매채널
+        definition: 클래스를 파는 경로(온라인, 오프라인, 직판)다.
+        type: text
+        missing_means: 클래스 부가정보 없음
+        motivated_by: [C1-06]
+      - column: han_clas_fee_type
+        label: 클래스 수수료 부과 유형
+        definition: 판매수수료를 언제 받는지(선취, 후취, 미징구)를 나타낸다.
+        type: text
+        missing_means: 클래스 부가정보 없음
+        motivated_by: [C1-06]
+
+  - id: Fund
+    label: 대표펀드
+    definition: 같은 대표예탁원종목번호를 공유하는 클래스들을 하나로 묶은 펀드다.
+    table: prfd01n001
+    grain: 대표예탁원종목번호 1개(파생 단위, 저장된 행이 아니다)
+    identity: [rptt_ksd_itm_no]
+    derived_from: FundClass
+    motivated_by: [C4-04]
+
+  # ───────────────────────── 채권 ─────────────────────────
+  - id: Bond
+    label: 채권 종목
+    definition: 채권종목번호 하나로 식별되는 발행 채권이다.
+    table: prbd01n001
+    grain: 채권종목번호 1개(여러 행에 같은 값으로 반복된다)
+    identity: [pd_no]
+    motivated_by: [C1-02, C2-03, C2-07, C3-03, C4-05]
+    attributes:
+      - column: pd_no
+        label: 채권종목번호
+        definition: 채권 종목을 유일하게 가리키는 표준코드다.
+        type: text
+        motivated_by: [C1-02, C2-03, C2-07, C3-03, C4-05]
+      - column: pd_nm
+        label: 채권명
+        definition: 채권 종목의 이름이다.
+        type: text
+        note: 행마다 이름 표기가 다른 종목이 극소수(2개) 있다.
+        motivated_by: [C1-02, C3-03]
+      - column: pd_pbcm
+        label: 발행기관명
+        definition: 채권을 발행한 기관의 등록 명칭이다.
+        type: text
+        missing_means: 발행기관 미기재(극소수)
+        motivated_by: [C4-05]
+      - column: crd_grd
+        label: 적용신용등급
+        definition: 채권에 적용되는 신용평가 등급(AAA부터 C0까지)이다.
+        type: text
+        missing_means: 등급 미부여(국공채는 전부 비어 있고 일부 회사채도 비어 있다)
+        motivated_by: [C1-01, C1-02, C4-05]
+      - column: curr_cd
+        label: 통화코드
+        definition: 채권의 표시 통화 코드다.
+        type: text
+        motivated_by: [C1-01]
+      - column: mat_dt
+        label: 상환일자
+        definition: 원금이 상환되는 만기일이며 영구채는 1차 콜행사 개시일이다.
+        type: date
+        motivated_by: [C1-02]
+      - column: srfc_irt
+        label: 표면이자율
+        definition: 채권 발행 조건에 정해진 연 쿠폰 금리다.
+        type: double precision
+        unit: '%'
+        zero_means: 실제 0%(할인채·복리채 등 이표가 없는 채권에서 나온다)
+        motivated_by: [C2-07]
+      - column: std_pd_mcls_nm
+        label: 상품중분류명
+        definition: 채권을 회사채·특수채·국공채 셋으로 나눈 분류다.
+        type: text
+        motivated_by: [C2-03]
+      - column: std_pd_scls_nm
+        label: 상품소분류명
+        definition: 중분류를 국고채·일반사채·은행채 등으로 더 나눈 분류다.
+        type: text
+        motivated_by: [C2-07]
+      - column: pd_risk_nm
+        label: 상품위험등급명
+        definition: 판매사가 매긴 투자위험등급을 '○○위험(n등급)' 형식으로 나타낸다.
+        type: text
+        note: 행마다 등급이 다른 종목이 극소수(8개) 있다.
+        motivated_by: [C1-07]
+        generalized_from: 펀드의 제로인 투자위험등급
+
+  - id: BondLot
+    label: 채권 시장·판매 LOT 행
+    definition: 채권 종목 하나의 거래구분(장내·장외)별 시세 행이거나 장외 판매 물량 LOT 하나다.
+    table: prbd01n001
+    grain: (채권종목번호, 거래구분, LOT 순번) 1개
+    identity: [pd_no, pd_exg_mkt, info_seq]
+    motivated_by: [C1-01, C2-03, C2-07, C3-03]
+    attributes:
+      - column: pd_exg_mkt
+        label: 거래구분
+        definition: 행이 장내 시세인지 장외 시세·판매 물량인지를 나타낸다.
+        type: text
+        motivated_by: [C2-07]
+      - column: info_seq
+        label: 판매 LOT 순번
+        definition: 같은 종목·거래구분·기준일 안에서 판매 LOT를 구분하는 순번이다.
+        type: bigint
+        motivated_by: [C1-01]
+      - column: trade_price
+        label: 매매단가
+        definition: 판매 물량으로 등록된 LOT의 표준투입단가다.
+        type: double precision
+        missing_means: 판매 물량으로 등록되지 않은 행
+        motivated_by: [C1-01, C3-03]
+      - column: buyable_quantity
+        label: 매수가능수량
+        definition: 판매 LOT에서 고객이 지금 매수할 수 있는 남은 수량이다.
+        type: double precision
+        missing_means: 판매 물량으로 등록되지 않은 행
+        zero_means: 판매 물량은 등록됐지만 남은 수량이 없어 살 수 없다
+        motivated_by: [C1-01, C1-02, C3-03]
+      - column: after_tax_yield
+        label: 개인 세후 운용수익률
+        definition: 판매 LOT를 개인이 매수할 때 세금을 뺀 기대 수익률이다.
+        type: double precision
+        unit: '%'
+        missing_means: 판매 물량으로 등록되지 않은 행
+        motivated_by: [C3-03]
+      - column: info_base_dt
+        label: 판매/민평 공통 기준일
+        definition: 채권 행의 판매·시가평가 정보가 기준으로 삼는 날짜다.
+        type: date
+        motivated_by: [C1-02]
+
+  - id: Issuer
+    label: 발행기관
+    definition: 채권을 발행한 기관이며 데이터에는 등록 명칭 문자열로만 존재한다.
+    table: prbd01n001
+    grain: 발행기관명 1개(파생 단위, 저장된 행이 아니다)
+    identity: [pd_pbcm]
+    derived_from: Bond
+    motivated_by: [C4-05]
+
+  # ───────────────────────── 구성종목 ─────────────────────────
+  - id: Holding
+    label: 구성종목 등재
+    definition: 국내 ETF 하나에 구성종목 하나가 등재된 기록이다.
+    table: domestic_etf_holdings
+    grain: 구성종목 등재 1건(같은 ETF에 같은 종목명이 코드 형식만 다르게 여러 번 나올 수 있다)
+    identity: [holding_id]
+    motivated_by: [C4-01, C4-02, C4-03, C4-06, C6-02]
+    attributes:
+      - column: holding_id
+        label: 구성종목 레코드 식별자
+        definition: 구성종목 등재 행을 유일하게 가리키는 번호다.
+        type: bigint
+        motivated_by: [C4-02]
+      - column: item_id
+        label: ETF 상품번호
+        definition: 구성종목이 속한 국내 ETF의 상품번호다.
+        type: text
+        motivated_by: [C4-01, C4-03]
+      - column: component_name
+        label: 구성종목명
+        definition: 스냅샷에 등록된 구성종목의 이름이며 편입 여부와 구성 집합을 비교하는 기준이다.
+        type: text
+        motivated_by: [C4-01, C4-02, C4-03, C4-06]
+      - column: component_code
+        label: 구성종목 코드
+        definition: 구성종목 코드 문자열로 형식이 섞여 있고 다른 테이블 코드와의 대응은 확인되지 않았다.
+        type: text
+        missing_means: 코드 미기재
+        motivated_by: [C4-01]
+
+relations:
+  - id: bondlot_of_bond
+    from: BondLot
+    to: Bond
+    label: 종목의 시장·판매 행이다
+    cardinality: n..1
+    via: [pd_no]
+    motivated_by: [C1-01, C2-03, C2-07, C3-03]
+  - id: bond_issued_by
+    from: Bond
+    to: Issuer
+    label: 발행기관이 발행했다
+    cardinality: n..1
+    via: [pd_pbcm]
+    motivated_by: [C4-05]
+  - id: class_of_fund
+    from: FundClass
+    to: Fund
+    label: 대표펀드에 속한 클래스다
+    cardinality: n..1
+    via: [rptt_ksd_itm_no]
+    derived: 같은 대표예탁원종목번호를 가진 클래스끼리 묶는다
+    motivated_by: [C4-04]
+  - id: etf_holds
+    from: DomesticEtf
+    to: Holding
+    label: 구성종목을 담고 있다
+    cardinality: 1..n
+    via: [pd_itm_no, item_id]
+    note: 구성종목은 국내 ETF에만 연결된다. 국내 ETN과 해외 상장상품의 구성종목 데이터는 없다.
+    motivated_by: [C4-01, C4-02, C4-03, C4-06, C6-02]
