@@ -40,7 +40,7 @@ def validate(sql: str) -> str:
     sql = _DIGIT_ALIAS.sub(r'\1"\2"', sql)
     try:
         statements = [s for s in sqlglot.parse(sql, read="postgres") if s is not None]
-    except sqlglot.errors.ParseError as e:
+    except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as e:  # TokenError: 따옴표 짝 불일치 등
         raise SQLGuardError(f"SQL 구문 오류: {_ANSI.sub('', str(e))}") from e
 
     if len(statements) != 1:

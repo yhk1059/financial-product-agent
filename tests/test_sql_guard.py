@@ -51,3 +51,9 @@ def test_adds_default_limit():
 def test_quotes_korean_and_digit_aliases():
     out = validate("SELECT pd_nm AS 상품명, du_er_1y AS 1년수익률 FROM pref01n001")
     assert '"1년수익률"' in out and '"상품명"' in out
+
+
+def test_unbalanced_quote_is_guard_error():
+    """따옴표 짝이 안 맞으면 sqlglot이 TokenError를 낸다. 도구 밖으로 새지 않고 SQLGuardError여야 한다."""
+    with pytest.raises(SQLGuardError, match="SQL 구문 오류"):
+        validate("SELECT COUNT(*) FROM prbd01n001 WHERE curr_cd = 'KRW\nAND crd_grd >= 'AA-")
