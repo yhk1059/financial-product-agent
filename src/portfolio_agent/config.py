@@ -22,6 +22,9 @@ ALLOWED_TABLES: tuple[str, ...] = (
     "domestic_etf_holdings",
 )
 
+# 온톨로지 연결 모드: off = 넣지 않음, ab = A·B층만, abc = A·B층 + 질문으로 검색한 C층
+ONTOLOGY_MODES: tuple[str, ...] = ("off", "ab", "abc")
+
 SCHEMA_CACHE_PATH = PROJECT_ROOT / "data" / "schema_catalog.json"
 
 

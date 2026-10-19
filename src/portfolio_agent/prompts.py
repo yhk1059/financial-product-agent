@@ -100,15 +100,18 @@ CHECK_QUERY = """당신은 꼼꼼한 PostgreSQL 전문가입니다. 아래 SQL�
 {schema}"""
 
 
-def generate_prompt(tables: list[str], schema: str, give_up: bool = False) -> str:
-    prompt = GENERATE_QUERY.format(top_k=settings.max_result_rows, rules=rules_for(tables), schema=schema)
+def generate_prompt(tables: list[str], schema: str, give_up: bool = False, rules: str | None = None) -> str:
+    """rules가 None이면 domain_rules.md의 규칙(rules_for), 아니면 그 글(온톨로지 조립 규칙)을 넣는다."""
+    rules = rules_for(tables) if rules is None else rules
+    prompt = GENERATE_QUERY.format(top_k=settings.max_result_rows, rules=rules, schema=schema)
     if give_up:
         prompt += "\n\n## 주의\n" + GIVE_UP.format(n=settings.max_query_attempts)
     return prompt
 
 
-def check_prompt(question: str, tables: list[str], schema: str) -> str:
-    return CHECK_QUERY.format(question=question, rules=rules_for(tables), schema=schema)
+def check_prompt(question: str, tables: list[str], schema: str, rules: str | None = None) -> str:
+    rules = rules_for(tables) if rules is None else rules
+    return CHECK_QUERY.format(question=question, rules=rules, schema=schema)
 
 
 def select_prompt(overview: str) -> str:

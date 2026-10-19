@@ -5,10 +5,12 @@
 - A층: 선택된 테이블의 개념·속성·관계와 속성 전용 규칙 → 스키마 카드 뒤에 붙이는 '테이블 의미'
 
 읽기(load_knowledge)만 DB를 쓰고, 나머지는 순수 함수다. 추적용 메타데이터(motivated_by, evidence,
-generalized_from)와 혼동 주의(confusable_with)는 넣지 않는다. 아직 에이전트에 연결하지 않았다.
+generalized_from)와 혼동 주의(confusable_with)는 넣지 않는다. 에이전트는 graph.retrieve_knowledge에서
+get_knowledge()와 build_context()를 부른다(--ontology ab|abc).
 """
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 from . import db
 from .retrieval import LAYER_A_RULES, LAYER_B_ITEMS, label_forms
@@ -58,6 +60,12 @@ def load_knowledge() -> Knowledge:
                             " ORDER BY rule_id, target_rule_id"):
             rules[r["rule_id"]][r["link_type"]].append(r["target_rule_id"])
     return Knowledge(items, concepts, attributes, relations, terms, rules)
+
+
+@lru_cache
+def get_knowledge() -> Knowledge:
+    """에이전트용: knowledge 스키마를 프로세스당 한 번만 읽는다. 다시 읽으려면 get_knowledge.cache_clear()."""
+    return load_knowledge()
 
 
 # ───────────────────────── 테이블 판정 ─────────────────────────

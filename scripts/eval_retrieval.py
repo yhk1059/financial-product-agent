@@ -6,12 +6,12 @@ uv run python scripts/eval_retrieval.py [--set golden|holdout] [--label 이름] 
   HOLDOUT_COVERAGE. 둘 다 C층 용어·규칙만 남긴다. A·B층 항목은 항상 들어가므로 뺀다.
 - 방식: vector(pgvector 코사인), keyword(이름·같은 말 일치, 규칙은 적용 대상에서 물려받음), hybrid(RRF).
   순위에서도 A·B층 항목을 빼고 상위 k를 자른다 (렌더링 때 어차피 따로 들어가므로).
-- 질문 임베딩은 data/retrieval_cache/에 캐시한다. 결과는 data/retrieval_runs/{label}.json.
+- 질문 임베딩은 data/retrieval_cache/에 캐시한다(portfolio_agent.search, 에이전트와 같은 캐시).
+  결과는 data/retrieval_runs/{label}.json.
 - 기본 방식·k는 retrieval.DEFAULT_METHOD/DEFAULT_K. 이 값은 골든으로만 정하고, 홀드아웃은 확인용으로만 쓴다.
 """
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import time
@@ -20,47 +20,17 @@ from datetime import datetime
 import yaml
 from load_ontology import connect
 
-from portfolio_agent import db
 from portfolio_agent.config import PROJECT_ROOT
-from portfolio_agent.embedding import EMBED_MODEL, VARIANT, embed, to_pgvector
-from portfolio_agent.retrieval import (
-    DEFAULT_K,
-    DEFAULT_METHOD,
-    FIXED_ITEMS,
-    keyword_rank,
-    label_forms,
-    order_forms,
-    recall_at,
-    rrf,
-)
+from portfolio_agent.embedding import EMBED_MODEL, VARIANT
+from portfolio_agent.retrieval import DEFAULT_K, DEFAULT_METHOD, FIXED_ITEMS, keyword_rank, recall_at, rrf
+from portfolio_agent.search import is_cached, load_index, question_vector, vector_rank
 
 QUESTIONS_PATHS = {
     "golden": PROJECT_ROOT / "golden" / "questions_v2.yaml",
     "holdout": PROJECT_ROOT / "golden" / "holdout_v1.yaml",
 }
-CACHE_PATH = PROJECT_ROOT / "data" / "retrieval_cache" / f"questions_{EMBED_MODEL}.json"
 RUNS_DIR = PROJECT_ROOT / "data" / "retrieval_runs"
 METHODS = ("vector", "keyword", "hybrid")
-
-
-def load_index():
-    """키워드 순위에 쓸 용어 표현, 규칙 적용 대상, 대상 이름을 읽는다 (읽기 계정)."""
-    _, rows = db.fetch(
-        "SELECT i.id, i.label, coalesce(array_agg(f.form) FILTER (WHERE f.form IS NOT NULL), '{}'),"
-        " t.order_values"
-        " FROM knowledge.term t JOIN knowledge.item i ON i.id = t.id"
-        " LEFT JOIN knowledge.term_surface_form f ON f.term_id = t.id GROUP BY i.id, i.label, t.order_values")
-    term_forms = {tid: label_forms(label) + list(forms) + order_forms(order)
-                  for tid, label, forms, order in rows}
-    _, rows = db.fetch("SELECT rule_id, array_agg(target_id ORDER BY target_id)"
-                       " FROM knowledge.rule_applies_to GROUP BY rule_id")
-    rule_targets = dict(rows)
-    _, rows = db.fetch("SELECT id, label FROM knowledge.item WHERE kind IN ('attribute', 'concept')")
-    target_forms = {i: label_forms(label) for i, label in rows if label}
-    _, rows = db.fetch("SELECT item_id FROM knowledge.item_embedding WHERE model = %s AND variant = %s",
-                       (EMBED_MODEL, VARIANT))
-    embedded = {r[0] for r in rows}
-    return term_forms, rule_targets, target_forms, embedded
 
 
 def load_gold(candidates: set[str]) -> dict[str, set[str]]:
@@ -86,28 +56,15 @@ def load_holdout_gold(candidates: set[str]) -> dict[str, set[str]]:
 
 
 def question_vectors(questions: list[dict]) -> dict[str, list[float]]:
-    cache = json.loads(CACHE_PATH.read_text()) if CACHE_PATH.exists() else {}
     out, new = {}, 0
     for q in questions:
-        key = hashlib.sha256(q["question"].encode()).hexdigest()
-        if key not in cache:
+        if not is_cached(q["question"]):
             if new:
                 time.sleep(1.1)
-            cache[key] = embed(q["question"])
             new += 1
-        out[q["id"]] = cache[key]
-    if new:
-        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CACHE_PATH.write_text(json.dumps(cache))
+        out[q["id"]] = question_vector(q["question"])
     print(f"질문 임베딩: 새로 {new}, 캐시 {len(questions) - new}")
     return out
-
-
-def vector_rank(vec: list[float]) -> list[str]:
-    v = to_pgvector(vec)
-    _, rows = db.fetch("SELECT item_id FROM knowledge.item_embedding WHERE model = %s AND variant = %s"
-                       " ORDER BY vec <=> %s::vector, item_id", (EMBED_MODEL, VARIANT, v))
-    return [r[0] for r in rows]
 
 
 def main():

@@ -1,6 +1,6 @@
 """골든 데이터셋으로 에이전트를 실행·채점한다 (golden/design.md 5절).
 
-uv run python scripts/eval_golden.py --label base [--check] [--runs 3] [--only C1-01,C4-06]
+uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc] [--runs 3] [--only C1-01,C4-06]
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]
     # DB·LLM 없이 현재 골든 버전으로 재채점. --label을 주면 그 이름의 새 파일(_r1.jsonl, _summary.md)로 저장
 uv run python scripts/eval_golden.py --compare base check                                 # 구성별 문항 비교표
@@ -21,7 +21,7 @@ import psycopg
 import yaml
 
 from portfolio_agent import db
-from portfolio_agent.config import PROJECT_ROOT, settings
+from portfolio_agent.config import ONTOLOGY_MODES, PROJECT_ROOT, settings
 from portfolio_agent.golden_eval import grade, sql_sha, to_json
 from portfolio_agent.sql_guard import SQLGuardError, validate
 
@@ -101,10 +101,11 @@ def run(args) -> None:
         ids = set(args.only.split(","))
         questions = [q for q in questions if q["id"] in ids]
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    agent = build_chat_agent(check=args.check)
+    agent = build_chat_agent(check=args.check, ontology=args.ontology)
     meta = {
         "label": args.label,
         "check": args.check,
+        "ontology": args.ontology,
         "model": settings.model,
         "git_rev": git_rev(),
         "golden_version": VERSION,
@@ -172,7 +173,8 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
         f"# 골든 {VERSION} 채점 요약: {rows[0].get('label', '-')}",
         "",
         f"- 모델 `{rows[0].get('model')}`, git `{rows[0].get('git_rev')}`, check_query "
-        f"{'켬' if rows[0].get('check') else '끔'}, 실행 {len(runs)}회 × {len(rows) // len(runs)}문항",
+        f"{'켬' if rows[0].get('check') else '끔'}, 온톨로지 `{rows[0].get('ontology', 'off')}`, "
+        f"실행 {len(runs)}회 × {len(rows) // len(runs)}문항",
         f"- **문항 정답률: {_rate(sum(r['correct'] for r in rows), len(rows))}**",
         "",
         "## 축별",
@@ -200,6 +202,8 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
     lines += [f"| {k} | {v} |" for k, v in reasons.most_common()] or ["| - | 0 |"]
 
     tokens = [r.get("tokens") for r in rows]
+    inputs = [r.get("input_tokens") for r in rows]
+    max_inputs = [r.get("max_input_tokens") for r in rows if r.get("max_input_tokens") is not None]
     lines += [
         "",
         "## 비용",
@@ -211,6 +215,8 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
         f"| LLM 호출 | {sum(r.get('llm_calls', 0) for r in rows)} | {_median([r.get('llm_calls') for r in rows])} |",
         f"| 쿼리 실행 | {sum(len(r['queries']) for r in rows)} | {_median([len(r['queries']) for r in rows])} |",
         f"| 토큰 | {sum(t for t in tokens if t) if any(tokens) else '-'} | {_median(tokens)} |",
+        f"| input 토큰 | {sum(t for t in inputs if t) if any(inputs) else '-'} | {_median(inputs)} |",
+        f"| 호출당 최대 input 토큰 | {'최대 ' + str(max(max_inputs)) if max_inputs else '-'} | {_median(max_inputs)} |",
     ]
 
     by_id: dict[str, list[dict]] = defaultdict(list)
@@ -282,6 +288,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="골든 데이터셋 채점")
     parser.add_argument("--label", help="구성 이름 (결과 파일 접두어, 기본 base). --rescore와 쓰면 새 이름으로 저장")
     parser.add_argument("--check", action="store_true", help="check_query 노드 사용")
+    parser.add_argument("--ontology", choices=ONTOLOGY_MODES, default="off",
+                        help="온톨로지 지식 모드 (off: 넣지 않음, ab: 테이블·공통, abc: +질문 검색)")
     parser.add_argument("--runs", type=int, default=1, help="같은 구성 반복 횟수 (일관성 측정)")
     parser.add_argument("--only", help="쉼표로 구분한 문항 ID")
     parser.add_argument("--rescore", help="저장된 JSONL을 DB·LLM 없이 다시 채점")

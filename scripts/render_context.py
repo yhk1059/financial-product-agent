@@ -4,7 +4,8 @@ uv run python scripts/render_context.py [--label render_v1]
 
 - 테이블 선택 대신 골든 정답 테이블(tables)을 쓴다. 테이블 선택이 늘 맞는다고 가정하므로 실제보다 작게 나올 수 있다.
   구성종목 테이블이 있으면 select_tables처럼 pref01n001을 더한다.
-- C층은 하이브리드 상위 DEFAULT_K개 (eval_retrieval.py와 같은 순위), 질문 임베딩은 캐시를 쓴다.
+- C층은 portfolio_agent.search.search (하이브리드 상위 DEFAULT_K개, 에이전트·eval_retrieval.py와 같은 순위),
+  질문 임베딩은 캐시를 쓴다.
 - 프롬프트 길이는 글자 수로 잰다(HCX 토크나이저가 로컬에 없다). 온톨로지를 넣은 프롬프트는
   prompts.GENERATE_QUERY 틀에 {rules}=조립 규칙, {schema}=스키마 카드 + A층 블록을 넣어 만든다.
 - 결과: data/context_runs/{label}/{문항id}.md (조립된 글), data/context_runs/{label}.json (수치)
@@ -16,13 +17,14 @@ import statistics
 from datetime import datetime
 
 import yaml
-from eval_retrieval import QUESTIONS_PATHS, load_gold, load_index, question_vectors, vector_rank
+from eval_retrieval import QUESTIONS_PATHS, load_gold
 
 from portfolio_agent.config import PROJECT_ROOT, settings
-from portfolio_agent.context import build_context, load_knowledge
+from portfolio_agent.context import build_context, get_knowledge
 from portfolio_agent.prompts import GENERATE_QUERY, NO_RULES, generate_prompt, rules_for
-from portfolio_agent.retrieval import DEFAULT_K, FIXED_ITEMS, keyword_rank, rrf
+from portfolio_agent.retrieval import DEFAULT_K, FIXED_ITEMS
 from portfolio_agent.schema_catalog import schema_card
+from portfolio_agent.search import load_index, search
 
 RUNS_DIR = PROJECT_ROOT / "data" / "context_runs"
 
@@ -37,11 +39,9 @@ def main():
     args = ap.parse_args()
 
     questions = yaml.safe_load(QUESTIONS_PATHS["golden"].read_text(encoding="utf-8"))
-    term_forms, rule_targets, target_forms, embedded = load_index()
-    candidates = embedded - FIXED_ITEMS
+    candidates = load_index()[3] - FIXED_ITEMS
     gold = load_gold(candidates)
-    vectors = question_vectors(questions)
-    kn = load_knowledge()
+    kn = get_knowledge()
 
     out_dir = RUNS_DIR / args.label
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -52,9 +52,7 @@ def main():
             tables.append("pref01n001")
         if rules_for(tables) != NO_RULES:
             raise SystemExit("domain_rules.md에 규칙이 있어 현재 프롬프트와 비교할 수 없다")
-        vec = [i for i in vector_rank(vectors[q["id"]]) if i in candidates]
-        kw = [i for i in keyword_rank(q["question"], term_forms, rule_targets, target_forms) if i in candidates]
-        top = rrf(vec, kw)[:DEFAULT_K]
+        top = search(q["question"])  # 에이전트(graph.retrieve_knowledge)와 같은 검색
         ctx = build_context(kn, tables, top)
 
         card = schema_card(tables)
