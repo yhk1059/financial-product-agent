@@ -21,3 +21,5 @@ wheels/
 
 # Eval outputs
 data/golden_runs/
+data/retrieval_runs/
+data/retrieval_cache/
