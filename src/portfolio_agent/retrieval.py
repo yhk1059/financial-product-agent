@@ -2,13 +2,18 @@
 
 import re
 
-# B층: 질문과 상관없이 항상 프롬프트에 넣는 공통 규칙 (2026-10-19 결정)
-LAYER_B_RULES = frozenset({
+# B층: 질문과 상관없이 항상 프롬프트에 넣는 공통 규칙과 기준일 용어 (2026-10-19 결정)
+LAYER_B_ITEMS = frozenset({
     "R-scope-default", "R-null-exclude", "R-units", "R-as-of-date", "R-outlier-raw", "R-oos-refusal",
+    "as_of_date",  # 날짜 계산 질문은 '지금' 같은 말이 없어도 기준일이 필요하다
 })
 # A층: 적용 대상이 속성뿐이라 선택된 테이블의 스키마 카드에 붙이는 규칙 (2026-10-19 결정)
 LAYER_A_RULES = frozenset({"R-zero-missing", "R-zero-is-value", "R-text-numeric"})
-FIXED_ITEMS = LAYER_A_RULES | LAYER_B_RULES
+FIXED_ITEMS = LAYER_A_RULES | LAYER_B_ITEMS
+
+# C층 검색 기본값 (2026-10-19 골든 채점으로 결정)
+DEFAULT_METHOD = "hybrid"
+DEFAULT_K = 15
 
 RRF_K = 60  # 표준값. 골든으로 조정하지 않았다
 RULE_FROM_TERM = 0.9  # 규칙이 적용 대상 용어의 키워드 점수를 물려받는 비율

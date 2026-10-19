@@ -2,7 +2,7 @@
 
 from portfolio_agent.retrieval import (
     LAYER_A_RULES,
-    LAYER_B_RULES,
+    LAYER_B_ITEMS,
     keyword_rank,
     label_forms,
     match_score,
@@ -59,4 +59,4 @@ def test_recall_at():
 
 
 def test_fixed_layers_disjoint():
-    assert not LAYER_A_RULES & LAYER_B_RULES
+    assert not LAYER_A_RULES & LAYER_B_ITEMS

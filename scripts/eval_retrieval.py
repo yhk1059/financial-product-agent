@@ -1,16 +1,18 @@
-"""온톨로지 C층 검색을 골든 문항으로 채점한다 (에이전트·HCX 대화 호출 없음).
+"""온톨로지 C층 검색을 골든(또는 홀드아웃) 문항으로 채점한다 (에이전트·HCX 대화 호출 없음).
 
-uv run python scripts/eval_retrieval.py [--label base] [--ks 5,10,15,20] [--detail-k 10]
+uv run python scripts/eval_retrieval.py [--set golden|holdout] [--label 이름] [--ks 5,10,15,20] [--detail-k 15]
 
-- 정답: knowledge.item_motivation(골든 id → 항목) 중 C층 용어·규칙. A·B층 규칙은 항상 들어가므로 뺀다.
+- 정답: 골든은 knowledge.item_motivation(골든 id → 항목), 홀드아웃은 tests/test_ontology.py의
+  HOLDOUT_COVERAGE. 둘 다 C층 용어·규칙만 남긴다. A·B층 항목은 항상 들어가므로 뺀다.
 - 방식: vector(pgvector 코사인), keyword(이름·같은 말 일치, 규칙은 적용 대상에서 물려받음), hybrid(RRF).
   순위에서도 A·B층 항목을 빼고 상위 k를 자른다 (렌더링 때 어차피 따로 들어가므로).
 - 질문 임베딩은 data/retrieval_cache/에 캐시한다. 결과는 data/retrieval_runs/{label}.json.
-- 홀드아웃은 방식·k를 정한 뒤 마지막에 한 번만 쓴다 (이 스크립트는 골든만 읽는다).
+- 기본 방식·k는 retrieval.DEFAULT_METHOD/DEFAULT_K. 이 값은 골든으로만 정하고, 홀드아웃은 확인용으로만 쓴다.
 """
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import time
 from datetime import datetime
@@ -21,9 +23,21 @@ from load_ontology import connect
 from portfolio_agent import db
 from portfolio_agent.config import PROJECT_ROOT
 from portfolio_agent.embedding import EMBED_MODEL, VARIANT, embed, to_pgvector
-from portfolio_agent.retrieval import FIXED_ITEMS, keyword_rank, label_forms, order_forms, recall_at, rrf
+from portfolio_agent.retrieval import (
+    DEFAULT_K,
+    DEFAULT_METHOD,
+    FIXED_ITEMS,
+    keyword_rank,
+    label_forms,
+    order_forms,
+    recall_at,
+    rrf,
+)
 
-QUESTIONS_PATH = PROJECT_ROOT / "golden" / "questions_v2.yaml"
+QUESTIONS_PATHS = {
+    "golden": PROJECT_ROOT / "golden" / "questions_v2.yaml",
+    "holdout": PROJECT_ROOT / "golden" / "holdout_v1.yaml",
+}
 CACHE_PATH = PROJECT_ROOT / "data" / "retrieval_cache" / f"questions_{EMBED_MODEL}.json"
 RUNS_DIR = PROJECT_ROOT / "data" / "retrieval_runs"
 METHODS = ("vector", "keyword", "hybrid")
@@ -61,6 +75,16 @@ def load_gold(candidates: set[str]) -> dict[str, set[str]]:
     return gold
 
 
+def load_holdout_gold(candidates: set[str]) -> dict[str, set[str]]:
+    """홀드아웃 문항별 정답: HOLDOUT_COVERAGE의 지식 줄마다 해결 항목을 모아 C층만 남긴다."""
+    path = PROJECT_ROOT / "tests" / "test_ontology.py"
+    spec = importlib.util.spec_from_file_location("test_ontology", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {qid: {i for refs in lines for i in refs if i in candidates}
+            for qid, lines in module.HOLDOUT_COVERAGE.items()}
+
+
 def question_vectors(questions: list[dict]) -> dict[str, list[float]]:
     cache = json.loads(CACHE_PATH.read_text()) if CACHE_PATH.exists() else {}
     out, new = {}, 0
@@ -88,16 +112,18 @@ def vector_rank(vec: list[float]) -> list[str]:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--label", default="base")
+    ap.add_argument("--set", choices=tuple(QUESTIONS_PATHS), default="golden", dest="qset")
+    ap.add_argument("--label", help="결과 파일 이름 (기본: --set 값)")
     ap.add_argument("--ks", default="5,10,15,20")
-    ap.add_argument("--detail-k", type=int, default=10, help="문항별 놓친 항목을 보여 줄 k")
+    ap.add_argument("--detail-k", type=int, default=DEFAULT_K, help="문항별 놓친 항목을 보여 줄 k")
     args = ap.parse_args()
-    ks = [int(k) for k in args.ks.split(",")]
+    ks = sorted({int(k) for k in args.ks.split(",")} | {DEFAULT_K})
+    label = args.label or args.qset
 
-    questions = yaml.safe_load(QUESTIONS_PATH.read_text(encoding="utf-8"))
+    questions = yaml.safe_load(QUESTIONS_PATHS[args.qset].read_text(encoding="utf-8"))
     term_forms, rule_targets, target_forms, embedded = load_index()
     candidates = embedded - FIXED_ITEMS
-    gold = load_gold(candidates)
+    gold = load_gold(candidates) if args.qset == "golden" else load_holdout_gold(candidates)
     vectors = question_vectors(questions)
 
     results = []
@@ -115,7 +141,7 @@ def main():
         })
 
     scored = [r for r in results if r["gold"]]
-    print(f"\n골든 {len(results)}문항 중 C층 정답이 있는 {len(scored)}문항, 후보 {len(candidates)}개"
+    print(f"\n{args.qset} {len(results)}문항 중 C층 정답이 있는 {len(scored)}문항, 후보 {len(candidates)}개"
           f" (고정 제외 {len(FIXED_ITEMS & embedded)}개), 정답 합계 {sum(len(r['gold']) for r in scored)}개\n")
     head = "방식      " + "".join(f"  재현율@{k:<3}" for k in ks) + "".join(f"  전부@{k:<3}" for k in ks)
     print(head)
@@ -125,6 +151,9 @@ def main():
         full = {k: sum(r["recall"][m][k] == 1 for r in scored) for k in ks}
         summary[m] = {"recall": rec, "full_hit": full}
         print(f"{m:<10}" + "".join(f"  {rec[k]:>9.1%}" for k in ks) + "".join(f"  {full[k]:>6}" for k in ks))
+    d = summary[DEFAULT_METHOD]
+    print(f"\n기본값 {DEFAULT_METHOD}@{DEFAULT_K}: 재현율 {d['recall'][DEFAULT_K]:.1%},"
+          f" 전부 맞힌 문항 {d['full_hit'][DEFAULT_K]}/{len(scored)}")
     kw_len = sorted(len(r["rankings"]["keyword"]) for r in results)
     print(f"\nkeyword가 고른 항목 수: 중앙값 {kw_len[len(kw_len) // 2]}, 최대 {kw_len[-1]}, 0개인 문항 {kw_len.count(0)}")
 
@@ -140,9 +169,9 @@ def main():
                     print(f"   {m:<8} {', '.join(misses[m])}")
 
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    out = RUNS_DIR / f"{args.label}.json"
+    out = RUNS_DIR / f"{label}.json"
     out.write_text(json.dumps({
-        "label": args.label, "created_at": datetime.now().isoformat(timespec="seconds"),
+        "label": label, "set": args.qset, "created_at": datetime.now().isoformat(timespec="seconds"),
         "model": EMBED_MODEL, "variant": VARIANT, "ks": ks, "summary": summary, "results": results,
     }, ensure_ascii=False, indent=1))
     print(f"\n→ {out.relative_to(PROJECT_ROOT)}")

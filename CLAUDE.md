@@ -10,7 +10,7 @@ Tables: `pref01n001` (domestic ETF/ETN), `pref02n001` (overseas ETF/ETN), `prfd0
 
 ## Commands
 
-Managed with `uv` (Python ≥3.13). `.env` must provide `PG*` (read-only account), `CLOVA_STUDIO_API_KEY`, `CLOVASTUDIO_MODEL`, and `LANGSMITH_*`. `KNOWLEDGE_PGUSER`/`KNOWLEDGE_PGPASSWORD` (`knowledge_writer`, writes only the `knowledge` schema) are needed only for `load_ontology.py`. Don't use `METADATA_PGUSER` or `SEMANTIC_DATABASE_URL`; the `agent_metadata`, `ontology`, and `semantic` schemas belong to other work.
+Managed with `uv` (Python ≥3.13). `.env` must provide `PG*` (read-only account), `CLOVA_STUDIO_API_KEY`, `CLOVASTUDIO_MODEL`, and `LANGSMITH_*`. `KNOWLEDGE_PGUSER`/`KNOWLEDGE_PGPASSWORD` (`knowledge_writer`, writes only the `knowledge` schema) are needed only for `load_ontology.py`, `embed_ontology.py`, and reading golden ids in `eval_retrieval.py`. Don't use `METADATA_PGUSER` or `SEMANTIC_DATABASE_URL`; the `agent_metadata`, `ontology`, and `semantic` schemas belong to other work.
 
 ```bash
 uv sync
@@ -25,6 +25,8 @@ uv run python scripts/verify_golden.py                   # rerun gold SQL → go
 uv run python scripts/verify_golden.py --questions golden/holdout_v1.yaml --out golden/gold_results_holdout_v1.json   # holdout gold (no review_sheet)
 uv run pytest tests/test_ontology.py                     # ontology YAML structure/existence/leak/coverage checks, no DB/LLM
 uv run python scripts/load_ontology.py [--dry-run]       # reload ontology/*.yaml into the knowledge schema (--dry-run: row counts only, no DB)
+uv run python scripts/embed_ontology.py [--dry-run]      # embed changed term/rule docs into knowledge.item_embedding (--dry-run: print docs, no API/DB writes)
+uv run python scripts/eval_retrieval.py [--set golden|holdout]   # score C-layer retrieval (vector/keyword/hybrid recall@k), no HCX chat calls
 uv run python scripts/eval_golden.py --label base [--check] [--runs 3] [--only C1-01,C4-06]   # score agent on golden v2
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]   # rescore without DB/LLM against the current golden version
 uv run python scripts/eval_golden.py --compare base check                                    # per-question table across labels
@@ -77,11 +79,13 @@ Outputs go to `data/golden_runs/` (gitignored). When changing prompts or `domain
 
 ## Ontology
 
-`ontology/` holds data-external definitions extracted from the golden set (book 『온톨로지 따라하기』 ch. 4–5). It is not wired into the agent yet (no prompt rendering).
+`ontology/` holds data-external definitions extracted from the golden set (book 『온톨로지 따라하기』 ch. 4–5). It is not wired into the agent yet (retrieval exists; no graph expansion or prompt rendering).
 - `model.yaml`: concepts (table, grain, identity, parent/discriminator, attributes with `missing_means`/`zero_means`) and relations (`via`, cardinality, `derived`).
 - `glossary.yaml`: term → `canonical` (`Concept`, `Concept.column`, or `{ref, values}`), `surface_forms` (synonyms) vs `confusable_with` (different things), `in_data: false` for concepts the data lacks.
 - `rules.yaml`: `R-*` rules with `type` 조건/시점/예외/계산, `applies_to`, `when`/`then`, `overrides`, `depends_on`, `disclose`, `evidence`.
 - `review_log.yaml`: human decisions (merge/drop/derive/demote/keep_low_confidence), source conflicts, one-off read-only profiling results, open questions, review approvals.
 - Every item has `motivated_by` (golden ids, trace only; drop it when rendering). Definitions must be general concepts, not per-question facts; question ids, golden proper nouns outside `examples`, holdout proper nouns, and copied gold SQL predicates are lint failures in `tests/test_ontology.py`. Its `HOLDOUT_COVERAGE` maps each holdout `tests_knowledge` line to the items that resolve it.
 - PostgreSQL copy: YAML is the source of truth; the `knowledge` schema is a copy. `scripts/load_ontology.py` applies `ontology/sql/knowledge_schema.sql` (idempotent DDL) and, in one transaction, deletes and reinserts every row, so never edit the tables by hand. All references (`canonical`, `applies_to`, `confusable_with` when it names an item, `overrides`/`depends_on`) are FKs to `item`, so a bad reference rolls back the whole load. `confusable_with` targets that aren't items go to `term_confusable.target_text`. `attribute_resolved` expands inherited attributes. `source_version` records the git commit, dirty flag, and file hashes. `financial_agent_reader` can SELECT everything except `item_motivation` (golden ids; for retrieval scoring only). Rerun the loader after editing the YAML.
+- Prompt layers (how an item will reach the prompt; constants in `src/portfolio_agent/retrieval.py`, not yet in YAML): **A** = attached by table selection (concepts, attributes, relations, plus attribute-only rules `LAYER_A_RULES`); **B** = always included (`LAYER_B_ITEMS`: six common rules and the `as_of_date` term; keep it small, it costs tokens on every question); **C** = chosen per question by retrieval (all other terms and rules). Decide by asking what you must look at to know an item is needed: the table → A, nothing → B, the question's words → C.
+- Embedding/retrieval: `embed_ontology.py` builds one doc per term (label + surface forms + definition) and per rule (`when` + labels of `applies_to` targets; `then` excluded), embeds with CLOVA embedding v2 (`bge-m3`, 1024-d, cosine) via `portfolio_agent.embedding`, and stores them in `knowledge.item_embedding` (no FK to `item`, so ontology reloads keep vectors; only docs whose `content_sha` changed are re-embedded). Retrieval (`portfolio_agent.retrieval`, pure functions, `tests/test_retrieval.py`) ranks C-layer items by pgvector cosine, by keyword (label/surface forms/`order_values`; rules inherit their targets' scores), and by RRF hybrid. Default is `hybrid` with k=15, chosen on golden only (golden 94.8%, holdout 93.6% recall@15 on 2026-10-19). Remaining misses are mostly product names (`R-name-exact`, `product_name`), which need value linking, not the dictionary. Tune k/methods on golden; use `--set holdout` only as a final check. Question embeddings are cached in `data/retrieval_cache/`, results go to `data/retrieval_runs/` (both gitignored).
 - Source priority when definitions conflict: `golden/design.md` policies/decisions > actual data > `schema_catalog.json` > `questions_v2.yaml` notes > `domain_rules_legacy.md`. When policies or gold change, update the matching ontology items and `review_log.yaml`.
