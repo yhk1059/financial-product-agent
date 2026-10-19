@@ -137,6 +137,20 @@ CREATE TABLE IF NOT EXISTS source_version (
     row_counts  jsonb NOT NULL
 );
 
+-- 검색용 임베딩 (scripts/embed_ontology.py가 채운다)
+-- item FK 없음: load_ontology.py의 전체 삭제·재적재에도 벡터를 보존한다.
+-- 사라진 항목은 embed_ontology.py가 지우고, content_sha가 바뀐 항목만 다시 임베딩한다.
+CREATE TABLE IF NOT EXISTS item_embedding (
+    item_id     text NOT NULL,
+    model       text NOT NULL,
+    variant     text NOT NULL,  -- 문서 조립 방식 (예: 'base')
+    content_sha text NOT NULL,  -- sha256(model, variant, content)
+    content     text NOT NULL,  -- 임베딩한 문서 원문
+    vec         vector(1024) NOT NULL,
+    embedded_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (item_id, model, variant)
+);
+
 -- 부모 개념의 속성을 자식 개념에 펼친다 (예: DomesticEtf ← DomesticListedProduct)
 CREATE OR REPLACE VIEW attribute_resolved AS
 WITH RECURSIVE lineage AS (
