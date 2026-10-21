@@ -59,6 +59,7 @@ class AskTrace:
     knowledge_layers: dict = field(default_factory=dict)  # 온톨로지 층별 항목 id (off면 빈 dict)
     seconds: float = 0.0
     retry_wait_seconds: float = 0.0
+    generation_errors: list[str] = field(default_factory=list)  # generate_query 구조화 출력이 두 번 다 이상했던 기록
 
 
 def ask(agent, question: str, thread_id: str, show_sql: bool = False) -> AskTrace:
@@ -105,6 +106,10 @@ def ask(agent, question: str, thread_id: str, show_sql: bool = False) -> AskTrac
                         print(f"  [result] {preview[-1] if preview else ''}")
                 elif node == "generate_query" and isinstance(m, AIMessage):
                     trace.answer = m.text
+                    if error := m.response_metadata.get("generation_error"):
+                        trace.generation_errors.append(error)
+                        if show_sql:
+                            print(f"  [generation_error] {error}")
     # 실행 횟수가 한도에 닿은 뒤의 답변은 give_up 모드에서 나온다(graph.generate_query).
     trace.gave_up = attempts >= settings.max_query_attempts
     trace.llm_calls, trace.tokens = usage.calls, usage.tokens

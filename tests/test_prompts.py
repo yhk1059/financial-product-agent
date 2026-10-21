@@ -46,3 +46,17 @@ def test_rules_none_keeps_current_prompt():
 def test_rules_override():
     assert "## 도메인 규칙\nX\n" in prompts.generate_prompt(["prbd01n001"], "(스키마)", rules="X")
     assert "## 도메인 규칙\nX\n" in prompts.check_prompt("질문", ["prbd01n001"], "(스키마)", rules="X")
+
+
+def test_generate_prompt_describes_structured_output():
+    """SQL 생성은 구조화 출력(action/sql/answer)으로 받고, 실행은 코드가 한다."""
+    prompt = prompts.generate_prompt(["prbd01n001"], "(스키마)")
+    for word in ('action="query"', 'action="answer"', "sql", "answer", "[실행 결과]"):
+        assert word in prompt
+    assert "바로 sql을 채웁니다" in prompt
+    assert "run_query" not in prompt and "도구" not in prompt
+
+
+def test_give_up_prompt_has_no_tool_call():
+    prompt = prompts.generate_prompt(["prbd01n001"], "(스키마)", give_up=True)
+    assert "answer만 채우세요" in prompt and "도구" not in prompt

@@ -12,13 +12,17 @@ retrieve_knowledge는 온톨로지 모드(config.ONTOLOGY_MODES)가 off가 아�
 LangGraph SQL Agent 튜토리얼 구조를 따르되, HCX-007이 tool_choice를 지원하지 않아
 - 테이블 선택은 구조화 출력(json_schema)으로,
 - 스키마 조회는 도구 호출 대신 프롬프트에 스키마 카드를 직접 넣는 방식으로,
+- SQL 생성도 도구 호출 대신 구조화 출력(QueryStep: action/sql/answer)으로 받고,
+  action=query이면 코드가 run_query 도구 호출을 만들어 실행을 강제한다
+  (모델이 '조회하겠습니다'라고 글만 쓰고 끝나는 실패를 구조적으로 막는다),
 - 쿼리 검토는 구조화 출력으로 SQL을 다시 받아 도구 호출 인자를 교체하는 방식으로 구현한다.
 """
 
 import logging
+import uuid
 from typing import Literal
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
@@ -51,6 +55,23 @@ class TableSelection(BaseModel):
 
 class CheckedQuery(BaseModel):
     query: str = Field(description="검토 후 실행할 최종 SQL")
+
+
+class QueryStep(BaseModel):
+    action: Literal["query", "answer"] = Field(
+        description="query: sql을 실행해 데이터를 조회한다. answer: 조회 없이 또는 지금까지의 결과로 최종 답변한다.")
+    sql: str = Field(description="action이 query일 때 실행할 단일 SELECT 문. answer이면 빈 문자열")
+    answer: str = Field(description="action이 answer일 때 사용자에게 보낼 최종 답변. query이면 빈 문자열")
+
+
+class FinalAnswer(BaseModel):
+    """쿼리 실행 한도에 닿은 뒤(give_up)에만 쓴다. sql 필드가 없어 더 실행할 수 없다."""
+
+    answer: str = Field(description="사용자에게 보낼 최종 답변")
+
+
+GENERATION_FAILED = "SQL을 만들지 못했습니다. 질문을 바꿔 다시 시도해 주세요."
+GIVE_UP_FAILED = "쿼리 실행 한도에 도달해 답변을 완성하지 못했습니다. 질문을 더 구체적으로 다시 해 주세요."
 
 
 def _last_question(messages: list[AnyMessage]) -> str:
@@ -105,20 +126,70 @@ def _with_knowledge(state: AgentState, card: str) -> str:
     return card + "\n\n" + extra if extra else card
 
 
+def _llm_history(messages: list[AnyMessage]) -> list[AnyMessage]:
+    """LLM에 보낼 대화 사본: 도구 호출과 도구 결과를 글로 바꾼다 (state는 그대로 둔다).
+
+    구조화 출력 호출에는 tools 정의가 없고, CLOVA API는 그런 호출에서 대화에 tool 메시지가 있으면 거부한다.
+    """
+    history = []
+    for m in messages:
+        if isinstance(m, AIMessage) and m.tool_calls:
+            sql = "\n\n".join(call["args"].get("query", "") for call in m.tool_calls)
+            history.append(AIMessage(f"[실행한 SQL]\n{sql}"))
+        elif isinstance(m, ToolMessage):
+            history.append(HumanMessage(f"[실행 결과]\n{m.text}"))
+        else:
+            history.append(m)
+    return history
+
+
+def _invalid_step(step) -> str | None:
+    """구조화 출력이 쓸 수 없는 모양이면 이유를, 괜찮으면 None을 돌려준다."""
+    if isinstance(step, QueryStep):
+        if step.action == "query" and not step.sql.strip():
+            return "action=query인데 sql이 비어 있음"
+        if step.action == "answer" and not step.answer.strip():
+            return "action=answer인데 answer가 비어 있음"
+        return None
+    if isinstance(step, FinalAnswer):
+        return None if step.answer.strip() else "answer가 비어 있음"
+    return f"예상하지 못한 출력: {type(step).__name__}"
+
+
+def _structured_step(schema: type[BaseModel], messages: list[AnyMessage]) -> tuple[BaseModel | None, str]:
+    """구조화 출력으로 한 단계를 받는다. 출력이 이상하면 한 번 다시 부르고, 그래도 이상하면 (None, 오류 요약)."""
+    llm = get_llm().with_structured_output(schema, method="json_schema")
+    errors = []
+    for _ in range(2):
+        try:
+            step = invoke_with_retry(llm, messages)
+        except Exception as e:  # 파싱·검증 실패
+            errors.append(f"{type(e).__name__}: {e}"[:300])
+            continue
+        problem = _invalid_step(step)
+        if problem is None:
+            return step, ""
+        errors.append(problem)
+    return None, " / ".join(errors)
+
+
 def generate_query(state: AgentState) -> dict:
     tables = state.get("selected_tables") or []
     schema = _with_knowledge(state, schema_card(tables)) if tables else "(이 질문에는 테이블 조회가 필요하지 않습니다.)"
     give_up = state.get("attempts", 0) >= settings.max_query_attempts
     rules = state.get("knowledge_rules") or None
-    messages = [SystemMessage(generate_prompt(tables, schema, give_up, rules=rules)), *state["messages"]]
-    # 대화에 tool 메시지가 있으면 CLOVA API는 tools 정의를 요구하므로 한도 도달 시에도 도구는 바인딩해 둔다.
-    response = invoke_with_retry(get_llm().bind_tools([run_query]), messages)
-    if give_up and response.tool_calls:
-        response = AIMessage(
-            content=response.text or "쿼리 실행 한도에 도달해 답변을 완성하지 못했습니다. 질문을 더 구체적으로 다시 해 주세요.",
-            id=response.id,
-        )
-    return {"messages": [response]}
+    messages = [SystemMessage(generate_prompt(tables, schema, give_up, rules=rules)), *_llm_history(state["messages"])]
+    step, error = _structured_step(FinalAnswer if give_up else QueryStep, messages)
+    if step is None:
+        log.warning("generate_query output invalid twice: %s", error)
+        text = GIVE_UP_FAILED if give_up else GENERATION_FAILED
+        return {"messages": [AIMessage(text, response_metadata={"generation_error": error})]}
+    if isinstance(step, FinalAnswer) or step.action == "answer":
+        return {"messages": [AIMessage(step.answer.strip())]}
+    # 실행은 LLM이 아니라 코드가 정한다: run_query 도구 호출을 직접 만들어 이후 노드(검토·실행)로 넘긴다.
+    msg_id = str(uuid.uuid4())
+    call = {"name": "run_query", "args": {"query": step.sql.strip()}, "id": f"call_{msg_id}"}
+    return {"messages": [AIMessage(content="", tool_calls=[call], id=msg_id)]}
 
 
 def check_query(state: AgentState) -> dict:

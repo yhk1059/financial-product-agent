@@ -214,6 +214,7 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
         f"{_median([r.get('retry_wait_seconds') for r in rows])} |",
         f"| LLM 호출 | {sum(r.get('llm_calls', 0) for r in rows)} | {_median([r.get('llm_calls') for r in rows])} |",
         f"| 쿼리 실행 | {sum(len(r['queries']) for r in rows)} | {_median([len(r['queries']) for r in rows])} |",
+        f"| 생성 실패(문항 수) | {sum(bool(r.get('generation_errors')) for r in rows)} | - |",
         f"| 토큰 | {sum(t for t in tokens if t) if any(tokens) else '-'} | {_median(tokens)} |",
         f"| input 토큰 | {sum(t for t in inputs if t) if any(inputs) else '-'} | {_median(inputs)} |",
         f"| 호출당 최대 input 토큰 | {'최대 ' + str(max(max_inputs)) if max_inputs else '-'} | {_median(max_inputs)} |",
