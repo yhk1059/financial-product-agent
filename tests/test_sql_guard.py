@@ -1,6 +1,6 @@
 import pytest
 
-from portfolio_agent.sql_guard import SQLGuardError, validate
+from portfolio_agent.sql_guard import ALIAS_SPACE_HINT, SQLGuardError, validate
 
 
 @pytest.mark.parametrize(
@@ -51,6 +51,29 @@ def test_adds_default_limit():
 def test_quotes_korean_and_digit_aliases():
     out = validate("SELECT pd_nm AS 상품명, du_er_1y AS 1년수익률 FROM pref01n001")
     assert '"1년수익률"' in out and '"상품명"' in out
+
+
+@pytest.mark.parametrize(
+    ("sql", "marked"),
+    [
+        ("SELECT pd_nm AS 상품명, after_tax_yield AS 개인 세후수익률 FROM prbd01n001", ">>세후수익률<<"),
+        # 숫자 별칭은 가드가 앞 단어만 따옴표로 감싸므로 남은 단어에서 오류가 난다
+        ("SELECT du_er_1y AS 1년 수익률 FROM pref01n001", '"1년" >>수익률<<'),
+    ],
+)
+def test_space_alias_error_marks_token_and_hints(sql, marked):
+    with pytest.raises(SQLGuardError) as e:
+        validate(sql)
+    assert marked in str(e.value)
+    assert ALIAS_SPACE_HINT in str(e.value)
+    assert "\x1b" not in str(e.value)
+
+
+def test_syntax_error_without_alias_has_no_alias_hint():
+    with pytest.raises(SQLGuardError) as e:
+        validate("SELEC * FROM")
+    assert ">>FROM<<" in str(e.value)
+    assert ALIAS_SPACE_HINT not in str(e.value)
 
 
 def test_unbalanced_quote_is_guard_error():
