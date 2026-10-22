@@ -62,16 +62,18 @@ class AskTrace:
     generation_errors: list[str] = field(default_factory=list)  # generate_query 구조화 출력이 두 번 다 이상했던 기록
 
 
-def ask(agent, question: str, thread_id: str, show_sql: bool = False) -> AskTrace:
+def ask(agent, question: str, thread_id: str, show_sql: bool = False,
+        oracle_ids: list[str] | None = None) -> AskTrace:
     usage = _UsageCounter()
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 30, "callbacks": [usage]}
     trace = AskTrace()
     pending_sql: dict[str, str] = {}  # tool_call_id → 실행될 SQL (check_query가 같은 id로 교체)
     attempts = 0
     start, wait_before = time.time(), llm.retry_wait_seconds()
-    for update in agent.stream(
-        {"messages": [HumanMessage(question)]}, config, stream_mode="updates"
-    ):
+    inputs = {"messages": [HumanMessage(question)]}
+    if oracle_ids is not None:  # 평가 전용 oracle 모드
+        inputs["oracle_ids"] = oracle_ids
+    for update in agent.stream(inputs, config, stream_mode="updates"):
         for node, data in update.items():
             if not data:
                 continue

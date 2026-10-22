@@ -13,7 +13,7 @@ def test_off_has_no_retrieve_node():
     assert "retrieve_knowledge" not in graph.build_graph(ontology="off").nodes
 
 
-@pytest.mark.parametrize("mode", ["ab", "abc"])
+@pytest.mark.parametrize("mode", ["ab", "abc", "oracle"])
 def test_on_has_retrieve_node(mode):
     assert "retrieve_knowledge" in graph.build_graph(ontology=mode).nodes
     assert "retrieve_knowledge" in graph.build_graph(check=True, ontology=mode).nodes
@@ -60,6 +60,39 @@ def test_abc_searches_last_question(calls):
     assert calls["search"] == ["마지막 질문"]
     assert calls["build"] == [(["prbd01n001"], ["term-x"])]
     assert out["knowledge_layers"]["C"] == ["term-x"]
+
+
+def test_oracle_uses_given_ids_without_search(calls):
+    out = graph.retrieve_knowledge({**STATE, "oracle_ids": ["R-topn-nulls", "etf"]}, "oracle")
+    assert calls["search"] == []
+    assert calls["build"] == [(["prbd01n001"], ["R-topn-nulls", "etf"])]
+    assert out["knowledge_layers"]["C"] == ["R-topn-nulls", "etf"]
+
+
+def test_oracle_without_ids_is_ab(calls):
+    graph.retrieve_knowledge(STATE, "oracle")
+    assert calls["build"] == [(["prbd01n001"], [])]
+
+
+def test_chat_cli_has_no_oracle():
+    from portfolio_agent.config import ONTOLOGY_MODES
+    assert "oracle" not in ONTOLOGY_MODES
+
+
+def test_ask_passes_oracle_ids():
+    from portfolio_agent import cli
+
+    seen = []
+
+    class FakeAgent:
+        def stream(self, inputs, config, stream_mode):
+            seen.append(inputs)
+            yield {"generate_query": {"messages": [AIMessage("답")]}}
+
+    cli.ask(FakeAgent(), "q", "t")
+    cli.ask(FakeAgent(), "q", "t", oracle_ids=["etf"])
+    assert "oracle_ids" not in seen[0]
+    assert seen[1]["oracle_ids"] == ["etf"]
 
 
 def test_failure_returns_empty(calls, monkeypatch):

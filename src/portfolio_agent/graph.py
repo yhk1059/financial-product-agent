@@ -7,6 +7,7 @@ check_query는 선택 사항(기본 끔): LLM 호출이 한 번 더 늘어 CLOVA
 retrieve_knowledge는 온톨로지 모드(config.ONTOLOGY_MODES)가 off가 아닐 때만 넣는다(기본 off).
 - ab: 선택된 테이블의 A층(개념·속성·관계, 속성 전용 규칙)과 B층(공통 규칙, 기준일)
 - abc: ab + 마지막 사용자 질문으로 검색한 C층 용어·규칙(search.search)
+- oracle(평가 전용): ab + 입력 state의 oracle_ids(문항의 정답 항목)를 C층으로. 검색이 완벽할 때를 재는 진단용
 조립된 글은 generate_query·check_query 프롬프트의 {rules} 자리와 스키마 카드 뒤에 들어간다. LLM 호출은 늘지 않는다.
 
 LangGraph SQL Agent 튜토리얼 구조를 따르되, HCX-007이 tool_choice를 지원하지 않아
@@ -28,7 +29,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
 
-from .config import ALLOWED_TABLES, ONTOLOGY_MODES, settings
+from .config import ALLOWED_TABLES, EVAL_ONTOLOGY_MODES, settings
 from .context import build_context, get_knowledge
 from .llm import get_llm, invoke_with_retry
 from .prompts import check_prompt, generate_prompt, select_prompt
@@ -47,6 +48,7 @@ class AgentState(MessagesState):
     knowledge_rules: str   # 온톨로지 조립 규칙 ({rules} 자리). 비면 domain_rules.md 규칙을 쓴다
     knowledge_tables: str  # 스키마 카드 뒤에 붙이는 A층 블록
     knowledge_layers: dict  # 층별 항목 id (보고용)
+    oracle_ids: list[str]   # oracle 모드에서 C층으로 쓸 항목 id (평가 스크립트가 입력으로 넣음)
 
 
 class TableSelection(BaseModel):
@@ -111,9 +113,17 @@ def select_tables(state: AgentState) -> dict:
 
 
 def retrieve_knowledge(state: AgentState, mode: str) -> dict:
-    """선택된 테이블(와 abc면 질문 검색 결과)로 온톨로지 글을 조립한다. 실패하면 빈 글(off와 같은 프롬프트)."""
+    """선택된 테이블(와 abc면 질문 검색 결과, oracle이면 주어진 정답 항목)로 온톨로지 글을 조립한다.
+
+    실패하면 빈 글(off와 같은 프롬프트).
+    """
     try:
-        c_ids = search(_last_question(state["messages"])) if mode == "abc" else []
+        if mode == "abc":
+            c_ids = search(_last_question(state["messages"]))
+        elif mode == "oracle":
+            c_ids = list(state.get("oracle_ids") or [])
+        else:
+            c_ids = []
         ctx = build_context(get_knowledge(), state.get("selected_tables") or [], c_ids)
     except Exception:
         log.exception("knowledge retrieval failed; continuing without ontology")
@@ -218,8 +228,8 @@ def route_after_generate(state: AgentState) -> Literal["check_query", "__end__"]
 
 
 def build_graph(checkpointer=None, check: bool = False, ontology: str = "off"):
-    if ontology not in ONTOLOGY_MODES:
-        raise ValueError(f"ontology는 {', '.join(ONTOLOGY_MODES)} 중 하나여야 합니다: {ontology!r}")
+    if ontology not in EVAL_ONTOLOGY_MODES:
+        raise ValueError(f"ontology는 {', '.join(EVAL_ONTOLOGY_MODES)} 중 하나여야 합니다: {ontology!r}")
     builder = StateGraph(AgentState)
     builder.add_node(select_tables)
     builder.add_node(generate_query)

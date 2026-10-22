@@ -1,6 +1,6 @@
 """골든 데이터셋으로 에이전트를 실행·채점한다 (golden/design.md 5절).
 
-uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc] [--runs 3] [--only C1-01,C4-06]
+uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc|oracle] [--runs 3] [--only C1-01,C4-06]
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]
     # DB·LLM 없이 현재 골든 버전으로 재채점. --label을 주면 그 이름의 새 파일(_r1.jsonl, _summary.md)로 저장
 uv run python scripts/eval_golden.py --compare base check                                 # 구성별 문항 비교표
@@ -21,7 +21,7 @@ import psycopg
 import yaml
 
 from portfolio_agent import db
-from portfolio_agent.config import ONTOLOGY_MODES, PROJECT_ROOT, settings
+from portfolio_agent.config import EVAL_ONTOLOGY_MODES, PROJECT_ROOT, settings
 from portfolio_agent.golden_eval import grade, sql_sha, to_json
 from portfolio_agent.sql_guard import SQLGuardError, validate
 
@@ -70,12 +70,25 @@ def last_rows(queries: list[dict]) -> tuple[list | None, list | None]:
     return (done[-1]["rerun_columns"], done[-1]["rerun_rows"]) if done else (None, None)
 
 
-def run_one(agent, q: dict, gold: dict, meta: dict) -> dict:
+def oracle_items() -> dict[str, list[str]]:
+    """문항별 정답 항목: glossary·rules 항목의 motivated_by를 문항 id로 뒤집는다(파일 순서 유지).
+
+    개념·속성·관계(model.yaml)는 A층이 테이블로 붙이므로 C층 후보인 용어·규칙만 쓴다.
+    """
+    items: dict[str, list[str]] = defaultdict(list)
+    for name, key in (("glossary", "terms"), ("rules", "rules")):
+        for item in yaml.safe_load((PROJECT_ROOT / "ontology" / f"{name}.yaml").read_text())[key]:
+            for qid in item.get("motivated_by") or []:
+                items[qid].append(item["id"])
+    return dict(items)
+
+
+def run_one(agent, q: dict, gold: dict, meta: dict, oracle_ids: list[str] | None = None) -> dict:
     from portfolio_agent.cli import ask  # 재채점·비교만 할 때는 LLM 모듈을 불러오지 않는다
 
     record = {"id": q["id"], "category": q["category"], "difficulty": q["difficulty"], **meta}
     try:
-        trace = asdict(ask(agent, q["question"], str(uuid.uuid4())))
+        trace = asdict(ask(agent, q["question"], str(uuid.uuid4()), oracle_ids=oracle_ids))
     except Exception as e:  # 평가 전체가 멈추지 않게 기록만 한다
         trace = {"answer": "", "queries": [], "error": f"{type(e).__name__}: {e}"}
     rerun(trace["queries"])
@@ -102,6 +115,7 @@ def run(args) -> None:
         questions = [q for q in questions if q["id"] in ids]
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     agent = build_chat_agent(check=args.check, ontology=args.ontology)
+    oracle = oracle_items() if args.ontology == "oracle" else None
     meta = {
         "label": args.label,
         "check": args.check,
@@ -116,7 +130,8 @@ def run(args) -> None:
         print(f"── run {i}/{args.runs} → {path.name}")
         with path.open("w") as f:
             for q in questions:
-                r = run_one(agent, q, gold, {**meta, "run": i})
+                ids = oracle.get(q["id"], []) if oracle is not None else None
+                r = run_one(agent, q, gold, {**meta, "run": i}, ids)
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
                 f.flush()
                 print_row(r)
@@ -289,8 +304,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="골든 데이터셋 채점")
     parser.add_argument("--label", help="구성 이름 (결과 파일 접두어, 기본 base). --rescore와 쓰면 새 이름으로 저장")
     parser.add_argument("--check", action="store_true", help="check_query 노드 사용")
-    parser.add_argument("--ontology", choices=ONTOLOGY_MODES, default="off",
-                        help="온톨로지 지식 모드 (off: 넣지 않음, ab: 테이블·공통, abc: +질문 검색)")
+    parser.add_argument("--ontology", choices=EVAL_ONTOLOGY_MODES, default="off",
+                        help="온톨로지 지식 모드 (off: 넣지 않음, ab: 테이블·공통, abc: +질문 검색, "
+                             "oracle: 검색 대신 문항의 정답 항목, 진단 전용)")
     parser.add_argument("--runs", type=int, default=1, help="같은 구성 반복 횟수 (일관성 측정)")
     parser.add_argument("--only", help="쉼표로 구분한 문항 ID")
     parser.add_argument("--rescore", help="저장된 JSONL을 DB·LLM 없이 다시 채점")

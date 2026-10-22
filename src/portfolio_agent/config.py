@@ -24,6 +24,8 @@ ALLOWED_TABLES: tuple[str, ...] = (
 
 # 온톨로지 연결 모드: off = 넣지 않음, ab = A·B층만, abc = A·B층 + 질문으로 검색한 C층
 ONTOLOGY_MODES: tuple[str, ...] = ("off", "ab", "abc")
+# 평가 전용: oracle = A·B층 + 검색 대신 문항의 정답 항목(motivated_by)을 C층으로. 대화 CLI에서는 쓰지 않는다
+EVAL_ONTOLOGY_MODES: tuple[str, ...] = (*ONTOLOGY_MODES, "oracle")
 
 SCHEMA_CACHE_PATH = PROJECT_ROOT / "data" / "schema_catalog.json"
 
