@@ -3,6 +3,9 @@
 # - surface_forms는 같은 뜻의 표현(동의어), confusable_with는 같은 말로 불리지만 다른 대상(혼동어)이다. 둘을 섞지 않는다.
 # - 문항 고유 상수(특정 상품명·기관명)는 examples에만 둔다.
 # - in_data: false 는 5개 테이블에 없는 개념이다(답할 수 없음을 밝혀야 한다).
+# - bundle: true 는 이 용어의 어떤 표현이든 canonical 값 전체를 뜻한다(MMF = MMF와 외화 MMF). 표현이 값 하나를
+#   가리키는 분류 용어(국고채 → 소분류 값 하나)에는 붙이지 않는다. 값 조건({ref, values})으로만 된 용어에만 쓴다.
+# - order_up: order(순서 있는 등급) 중 어느 끝이 "이상"(높은 쪽)인지. first = 앞쪽, last = 뒤쪽. order가 있으면 반드시 둔다.
 # - motivated_by는 추적용 메타데이터이고 프롬프트로 렌더링할 때는 뺀다.
 
 terms:
@@ -94,6 +97,7 @@ terms:
     confusable_with:
       - {target: credit_rating, why: 신용등급은 발행자의 채무 상환 능력이고 위험등급은 상품 손실 위험이다}
     order: [매우 높은 위험, 높은 위험, 다소 높은 위험, 보통 위험, 낮은 위험, 매우 낮은 위험]
+    order_up: first
     generalized_from: 펀드 위험등급 → 국내 상장상품·채권(같은 6단계 이름에 등급 번호가 붙음)
     evidence: ['profiling:risk_grade']
     motivated_by: [C1-07]
@@ -137,6 +141,7 @@ terms:
     confusable_with:
       - {target: risk_grade, why: 상품 투자위험등급과 다른 축이다}
     order: [AAA, AA+, AA0, AA-, A+, A0, A-, BBB+, BBB0, BBB-, BB0, BB-, B+, B-, C0]
+    order_up: first
     evidence: [P-GRADE]
     motivated_by: [C1-01, C1-02, C4-05]
 
@@ -145,6 +150,7 @@ terms:
     definition: 원화(KRW)로 표시된 상품이다.
     canonical:
       - {ref: Bond.curr_cd, values: [KRW]}
+    bundle: true
     scope_tables: [prbd01n001]
     surface_forms: [원화채권, 원화, 원화 표시]
     confusable_with:
@@ -241,6 +247,7 @@ terms:
     definition: 불특정 다수에게 공개적으로 모집하는 상품이다.
     canonical:
       - {ref: FundClass.prvo_pbff_desc, values: [공모]}
+    bundle: true
     scope_tables: [prfd01n001]
     surface_forms: [공모, 공모펀드]
     confusable_with:
@@ -277,6 +284,7 @@ terms:
     definition: MMF는 제로인 대유형의 MMF와 외화 MMF를 모두 가리킨다.
     canonical:
       - {ref: FundClass.zrin_btyp_nm, values: [MMF, 외화 MMF]}
+    bundle: true
     scope_tables: [prfd01n001]
     surface_forms: [MMF, 머니마켓펀드, 단기금융펀드]
     confusable_with:
@@ -317,6 +325,7 @@ terms:
     canonical:
       - {ref: DomesticListedProduct.pd_grp_no, values: [ETF]}
       - {ref: OverseasListedProduct.pd_grp_no, values: [ETF]}
+    bundle: true
     scope_tables: [pref01n001, pref02n001]
     surface_forms: [ETF, 상장지수펀드]
     confusable_with:
@@ -331,6 +340,7 @@ terms:
     canonical:
       - {ref: DomesticListedProduct.pd_grp_no, values: [ETN]}
       - {ref: OverseasListedProduct.pd_grp_no, values: [ETN]}
+    bundle: true
     scope_tables: [pref01n001, pref02n001]
     surface_forms: [ETN, 상장지수증권]
     confusable_with:
@@ -380,6 +390,7 @@ terms:
     definition: 연금저축·IRP 같은 연금계좌에서 매수할 수 있는 상장상품이다.
     canonical:
       - {ref: DomesticListedProduct.pd_pen_tr_yn, values: ['Y']}
+    bundle: true
     scope_tables: [pref01n001]
     surface_forms: [연금계좌, 연금계좌에서 살 수 있는, 연금 가능]
     confusable_with:

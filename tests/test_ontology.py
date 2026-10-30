@@ -177,6 +177,11 @@ def test_glossary_fields(t):
     for c in t["canonical"]:
         ref = c["ref"] if isinstance(c, dict) else c
         assert model_ref_ok(ref), ref
+    if t.get("bundle"):  # 묶음은 값 조건으로만 된 용어다
+        assert t["bundle"] is True and t["canonical"] and all(isinstance(c, dict) for c in t["canonical"])
+    assert ("order" in t) == ("order_up" in t), "order와 order_up은 함께 둔다"
+    if "order_up" in t:
+        assert t["order_up"] in ("first", "last")
     for c in t["confusable_with"]:
         assert c["target"] and c["why"]
         if re.fullmatch(r"[A-Za-z_][\w.]*", c["target"]):  # 식별자 모양이면 반드시 해석되어야 한다
@@ -218,7 +223,8 @@ def test_review_log_links():
             assert ref in item_ids, (p["id"], ref)
     for q in REVIEW["open_questions"]:
         assert set(q["related"]) <= DECISIONS, q["id"]
-    assert {d["type"] for d in REVIEW["decisions"]} <= {"merge", "drop", "reverse", "derive", "demote", "keep_low_confidence"}
+    assert {d["type"] for d in REVIEW["decisions"]} <= {"merge", "drop", "reverse", "derive", "demote", "keep_low_confidence",
+                                                         "add_field"}
 
 
 DEFINED = [(s, i, x) for s, i, x in ITEMS if s == "glossary" or i not in RELATIONS and s == "model"]

@@ -263,8 +263,11 @@ def _exclusion_kind(col) -> str | None:
     return None
 
 
-def applied_conditions(sqls: list[str]) -> str:
-    """성공한 SQL들에 들어 있는 공시 대상 조건을 '[적용 조건]' 블록으로 만든다. 없으면 빈 문자열."""
+def applied_conditions(sqls: list[str], extra: list[str] = ()) -> str:
+    """성공한 SQL들에 들어 있는 공시 대상 조건을 '[적용 조건]' 블록으로 만든다. 없으면 빈 문자열.
+
+    extra: 끝에 붙일 줄(예: --slots의 이름 해석).
+    """
     lines = []
     for sql in sqls:
         tree = _parse(sql)
@@ -279,5 +282,5 @@ def applied_conditions(sqls: list[str]) -> str:
                 continue
             label = info["comment"] or info["name"]
             lines.append(f"{label}: 값이 없는 행 제외" if kind == "null" else f"{label}: 0인 행 제외")
-    lines = list(dict.fromkeys(lines))
+    lines = list(dict.fromkeys([*lines, *extra]))
     return "\n\n[적용 조건]\n" + "\n".join(f"- {line}" for line in lines) if lines else ""

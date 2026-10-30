@@ -97,6 +97,27 @@ SQL은 쓰지 않습니다. 다음 단계가 이 계획을 보고 SQL을 쓰고 
 
 PLAN_SECTION = "## 실행 계획\n앞 단계에서 세운 계획입니다. 이 계획대로 조회하고 답합니다.\n{plan}"
 
+ANALYZE_QUESTION = """당신은 금융상품 질문에서 특정한 말을 원문 그대로 찾아 칸에 옮기는 일을 합니다.
+무엇을 조회할지 판단하거나 SQL을 쓰지 않습니다. 대화의 마지막 사용자 질문(앞 대화를 가리키면 그 말까지)에서 찾습니다.
+
+## 칸
+- names: 특정 상품·기관·종목을 가리키는 고유한 이름.
+  - text: 질문에 쓰인 그대로(띄어쓰기·대소문자 포함). 고치거나 정식 명칭으로 늘리지 않습니다.
+  - kind: 상품(ETF·ETN·펀드·채권의 상품 이름), 발행기관(채권을 발행한 회사·기관), 구성종목(ETF가 담은 종목).
+  - '채권', '국내 ETF', '주식형 펀드'처럼 종류를 가리키는 일반 명사는 이름이 아닙니다.
+- grades: 등급 조건.
+  - term: 등급 종류를 가리킨 말(예: 신용등급, 위험등급). 그냥 '등급'이라고 했으면 '등급', 말이 없으면 빈 문자열.
+  - value: 기준 등급 값 원문(예: BBB+, 3등급, 다소 높은 위험).
+  - direction: 원문 방향어를 다섯 중 하나로 옮깁니다. 이상(이상·부터 위), 이하(이하·까지), 초과(넘는·보다 높은), 미만(보다 낮은·못 미치는), 같음(그 등급만).
+- values: 상품 유형·분류·범주로 보이는 말(예: 주식형, MMF, 공모, 원화). 이름(names)에 넣은 말과 등급은 넣지 않습니다.
+
+## 지킬 것
+- 원문에 있는 말만 넣습니다. 바꾸거나 추측해서 더하지 않습니다.
+- 해당하는 말이 없으면 빈 목록으로 둡니다.
+- 예: '가나증권이 발행한 신용등급 A0 이상 채권' → names [가나증권/발행기관], grades [신용등급/A0/이상], values []"""
+
+RESOLVED_SECTION = "## 확인된 값\n코드가 데이터와 용어 사전으로 확인한 값입니다. 해당 조건은 이 조각을 그대로 씁니다.\n{resolved}"
+
 GIVE_UP = (
     "쿼리 실행 횟수 한도({n}회)에 도달했습니다. 더 이상 SQL을 만들지 말고 answer만 채우세요. "
     "지금까지의 결과로 답할 수 있는 만큼 답하고 답하지 못한 부분과 이유를 설명하세요."
@@ -125,15 +146,17 @@ CHECK_QUERY = """당신은 꼼꼼한 PostgreSQL 전문가입니다. 아래 SQL�
 
 
 def generate_prompt(tables: list[str], schema: str, give_up: bool = False, rules: str | None = None,
-                    plan: str = "") -> str:
+                    plan: str = "", resolved: str = "") -> str:
     """rules가 None이면 domain_rules.md의 규칙(rules_for), 아니면 그 글(온톨로지 조립 규칙)을 넣는다.
 
-    plan(plan_query의 계획)이 비면 계획 없는 프롬프트와 글자까지 같다.
+    plan(plan_query의 계획)·resolved(resolve_slots의 확인된 값)가 비면 그것 없는 프롬프트와 글자까지 같다.
     """
     rules = rules_for(tables) if rules is None else rules
     prompt = GENERATE_QUERY.format(top_k=settings.max_result_rows, rules=rules, schema=schema)
     if plan:
         prompt += "\n\n" + PLAN_SECTION.format(plan=plan)
+    if resolved:
+        prompt += "\n\n" + RESOLVED_SECTION.format(resolved=resolved)
     if give_up:
         prompt += "\n\n## 주의\n" + GIVE_UP.format(n=settings.max_query_attempts)
     return prompt

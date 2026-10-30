@@ -27,20 +27,30 @@ def fetch(sql: str, params: Any = None) -> tuple[list[str], list[tuple]]:
         return columns, cur.fetchall() if cur.description else []
 
 
-def lookup_values(table: str, column: str, text: str, mode: str, limit: int = 10) -> list[str]:
-    """컬럼에 저장된 값 중 text와 맞는 것을 짧은 순으로 돌려준다 (파라미터 바인딩, 읽기 전용).
-
-    mode: 'exact' = 정확히 같음, 'partial' = 공백·대소문자를 무시하고 text를 포함함.
-    테이블·컬럼 이름은 허용 테이블과 스키마 카탈로그에 있을 때만 쓴다(문자열 조립 방지).
-    """
+def _checked(table: str, column: str) -> str:
     from .schema_catalog import load_catalog
 
     columns = {c["name"] for c in load_catalog()["tables"].get(table, {}).get("columns", [])}
     if table not in ALLOWED_TABLES or column not in columns:
         raise ValueError(f"조회할 수 없는 컬럼: {table}.{column}")
-    col = sql.Identifier(column)
+    return column
+
+
+def lookup_values(table: str, column: str, text: str, mode: str, limit: int = 10) -> list[str]:
+    """컬럼에 저장된 값 중 text와 맞는 것을 짧은 순으로 돌려준다 (파라미터 바인딩, 읽기 전용).
+
+    mode: 'exact' = 정확히 같음, 'normalized' = 공백·대소문자·법인 표기((주), (유), ㈜, 주식회사)를 무시하고 같음
+    (slots.normalize_name과 같은 규칙), 'partial' = 공백·대소문자를 무시하고 text를 포함함.
+    테이블·컬럼 이름은 허용 테이블과 스키마 카탈로그에 있을 때만 쓴다(문자열 조립 방지).
+    """
+    col = sql.Identifier(_checked(table, column))
     if mode == "exact":
         cond, param = sql.SQL("{} = %s").format(col), text
+    elif mode == "normalized":
+        from .slots import normalize_name
+
+        cond = sql.SQL(r"regexp_replace(lower({}), '\s+|\(주\)|\(유\)|㈜|주식회사', '', 'g') = %s").format(col)
+        param = normalize_name(text)
     elif mode == "partial":
         pattern = text.lower().replace(" ", "").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         cond, param = sql.SQL("replace(lower({}), ' ', '') LIKE %s").format(col), f"%{pattern}%"
@@ -51,3 +61,20 @@ def lookup_values(table: str, column: str, text: str, mode: str, limit: int = 10
     with connect() as conn, conn.cursor() as cur:
         cur.execute(query, (param, limit))
         return [r[0] for r in cur.fetchall()]
+
+
+def lookup_ids(table: str, column: str, value: str, id_column: str, limit: int = 11) -> list[str]:
+    """column = value인 행의 id_column 값들 (정렬, 중복 제거)."""
+    query = sql.SQL("SELECT DISTINCT {id} FROM {table} WHERE {col} = %s ORDER BY {id} LIMIT %s").format(
+        id=sql.Identifier(_checked(table, id_column)), col=sql.Identifier(_checked(table, column)),
+        table=sql.Identifier("public", table))
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(query, (value, limit))
+        return [str(r[0]) for r in cur.fetchall()]
+
+
+class DbLookup:
+    """slots.Lookup의 DB 구현."""
+
+    values = staticmethod(lookup_values)
+    ids = staticmethod(lookup_ids)

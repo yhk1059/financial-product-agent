@@ -1,6 +1,6 @@
 """골든 데이터셋으로 에이전트를 실행·채점한다 (golden/design.md 5절).
 
-uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc|oracle] [--enforce] [--plan] [--runs 3] [--only C1-01,C4-06]
+uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc|oracle] [--enforce] [--plan | --slots] [--runs 3] [--only C1-01,C4-06]
 uv run python scripts/eval_golden.py --set holdout --label x_holdout [...]   # 홀드아웃(golden/holdout_v1.yaml) 채점
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]
     # DB·LLM 없이 현재 골든 버전으로 재채점. --label을 주면 그 이름의 새 파일(_r1.jsonl, _summary.md)로 저장
@@ -122,7 +122,8 @@ def run(args) -> None:
         ids = set(args.only.split(","))
         questions = [q for q in questions if q["id"] in ids]
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    agent = build_chat_agent(check=args.check, ontology=args.ontology, enforce=args.enforce, plan=args.plan)
+    agent = build_chat_agent(check=args.check, ontology=args.ontology, enforce=args.enforce, plan=args.plan,
+                             slots=args.slots)
     oracle = oracle_items() if args.ontology == "oracle" else None
     meta = {
         "label": args.label,
@@ -130,6 +131,7 @@ def run(args) -> None:
         "ontology": args.ontology,
         "enforce": args.enforce,
         "plan": args.plan,
+        "slots": args.slots,
         "model": settings.model,
         "git_rev": git_rev(),
         "golden_version": SETS[args.set][0],
@@ -201,6 +203,7 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
         f"{'켬' if rows[0].get('check') else '끔'}, 온톨로지 `{rows[0].get('ontology', 'off')}`, "
         f"enforce {'켬' if rows[0].get('enforce') else '끔'}, "
         f"plan {'켬' if rows[0].get('plan') else '끔'}, "
+        f"slots {'켬' if rows[0].get('slots') else '끔'}, "
         f"실행 {len(runs)}회 × {len(rows) // len(runs)}문항",
         f"- **문항 정답률: {_rate(sum(r['correct'] for r in rows), len(rows))}**",
         "",
@@ -247,6 +250,9 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
         f"| 호출당 최대 input 토큰 | {'최대 ' + str(max(max_inputs)) if max_inputs else '-'} | {_median(max_inputs)} |",
     ]
 
+    if rows[0].get("slots"):
+        lines += slot_summary(rows)
+
     by_id: dict[str, list[dict]] = defaultdict(list)
     for r in rows:
         by_id[r["id"]].append(r)
@@ -274,6 +280,38 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
         unstable = sum(0 < sum(r["correct"] for r in rs) < len(rs) for rs in by_id.values())
         lines += ["", f"**일관성:** 안정 정답 {stable}문항, 불안정 {unstable}문항 ({len(runs)}회 기준)"]
     return "\n".join(lines) + "\n"
+
+
+def slot_used(r: dict, sql: str) -> bool:
+    """확인된 조각이 SQL에 들어갔는가: 그 컬럼 이름과 값이 모두 SQL에 보인다(대소문자·따옴표 무시)."""
+    text = sql.lower().replace('"', "")
+    return r["column"].lower() in text and all(f"'{v}'".lower() in text for v in r["values"])
+
+
+def slot_summary(rows: list[dict]) -> list[str]:
+    """칸 진단: LLM이 칸을 뽑았나 → 코드가 처리했나 → SQL이 따랐나(used: 마지막 성공 SQL에 조각이 들어감)."""
+    with_slots = [r for r in rows if any(r.get("slots", {}).get(k) for k in ("names", "grades", "values"))]
+    status = Counter((x["slot"], x["status"]) for r in rows for x in r.get("resolved", []))
+    confirmed = [(r, x) for r in rows for x in r.get("resolved", []) if x["status"] == "confirmed"]
+
+    def last_sql(r):
+        ok = [q["sql"] for q in r["queries"] if q["ok"]]
+        return ok[-1] if ok else ""
+
+    used = sum(slot_used(x, last_sql(r)) for r, x in confirmed)
+    lines = ["", "## 칸(slots)", f"- 칸이 하나라도 있는 문항: {len(with_slots)}/{len(rows)}",
+             f"- 확인된 조각이 마지막 성공 SQL에 들어감(used): {used}/{len(confirmed)}",
+             "", "| 칸 | 상태 | 개수 |", "|---|---|---|"]
+    lines += [f"| {slot} | {st} | {n} |" for (slot, st), n in sorted(status.items())] or ["| - | - | 0 |"]
+    lines += ["", "| ID | 정답 | 칸 처리 (상태 · 조각, used) |", "|---|---|---|"]
+    for r in rows:
+        items = [x for x in r.get("resolved", []) if x["status"] != "skipped"]
+        if not items:
+            continue
+        cells = [f"{x['text']}: {x['status']}" + (f" ({'used' if slot_used(x, last_sql(r)) else 'not used'})"
+                                                    if x["status"] == "confirmed" else "") for x in items]
+        lines.append(f"| {r['id']} | {'O' if r['correct'] else 'X'} | " + "; ".join(cells).replace("|", "\\|") + " |")
+    return lines
 
 
 def write_summary(label: str, rows: list[dict], questions: list[dict]) -> None:
@@ -323,6 +361,7 @@ def main() -> None:
                              "oracle: 검색 대신 문항의 정답 항목, 진단 전용)")
     parser.add_argument("--enforce", action="store_true", help="규칙 강제(sql_rules) 사용")
     parser.add_argument("--plan", action="store_true", help="실행 계획(plan_query) 노드 사용")
+    parser.add_argument("--slots", action="store_true", help="칸 추출(analyze_question)·처리(resolve_slots) 노드 사용")
     parser.add_argument("--runs", type=int, default=1, help="같은 구성 반복 횟수 (일관성 측정)")
     parser.add_argument("--only", help="쉼표로 구분한 문항 ID")
     parser.add_argument("--rescore", help="저장된 JSONL을 DB·LLM 없이 다시 채점")

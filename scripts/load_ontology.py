@@ -33,7 +33,7 @@ TABLES: dict[str, tuple[str, ...]] = {
                 "discriminator_value", "derived_from"),
     "attribute": ("id", "concept_id", "column_name", "data_type", "unit", "missing_means", "zero_means"),
     "relation": ("id", "from_id", "to_id", "cardinality", "via", "derived"),
-    "term": ("id", "scope_tables", "in_data", "order_values", "examples"),
+    "term": ("id", "scope_tables", "in_data", "order_values", "examples", "bundle", "order_up"),
     "term_canonical": ("term_id", "seq", "ref_id", "ref_values"),
     "term_surface_form": ("term_id", "form"),
     "term_confusable": ("term_id", "seq", "target_id", "target_text", "why"),
@@ -119,7 +119,7 @@ def build_rows(docs: dict[str, dict]) -> dict[str, list[tuple]]:
 
     for t in glossary["terms"]:
         rows["term"].append((t["id"], t["scope_tables"], t.get("in_data", True),
-                             t.get("order"), t.get("examples")))
+                             t.get("order"), t.get("examples"), t.get("bundle", False), t.get("order_up")))
         for i, c in enumerate(t["canonical"]):
             ref, values = (c["ref"], c["values"]) if isinstance(c, dict) else (c, None)
             rows["term_canonical"].append((t["id"], i, ref, values))

@@ -22,7 +22,7 @@ class Knowledge:
     concepts: dict[str, dict]    # id → table_name, grain, identity, parent_id, discriminator, ...
     attributes: dict[str, dict]  # 'Concept.column' → concept_id, column_name, data_type, unit, ...
     relations: dict[str, dict]   # id → from_id, to_id, cardinality, via, derived
-    terms: dict[str, dict]       # id → scope_tables, in_data, order_values, forms, canonical
+    terms: dict[str, dict]       # id → scope_tables, in_data, order_values, bundle, order_up, forms, canonical
     rules: dict[str, dict]       # id → rule_type, when_text, then_text, disclose, targets, depends_on, overrides
 
 
@@ -47,7 +47,7 @@ def load_knowledge() -> Knowledge:
         attributes = {r["id"]: r for r in _rows(cur, "SELECT * FROM knowledge.attribute")}
         relations = {r["id"]: r for r in _rows(cur, "SELECT * FROM knowledge.relation")}
         terms = {r["id"]: {**r, "forms": [], "canonical": []}
-                 for r in _rows(cur, "SELECT id, scope_tables, in_data, order_values FROM knowledge.term")}
+                 for r in _rows(cur, "SELECT id, scope_tables, in_data, order_values, bundle, order_up FROM knowledge.term")}
         for r in _rows(cur, "SELECT term_id, form FROM knowledge.term_surface_form ORDER BY term_id, form"):
             terms[r["term_id"]]["forms"].append(r["form"])
         for r in _rows(cur, "SELECT term_id, ref_id, ref_values FROM knowledge.term_canonical ORDER BY term_id, seq"):

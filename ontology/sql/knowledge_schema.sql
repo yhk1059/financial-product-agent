@@ -72,6 +72,9 @@ CREATE TABLE IF NOT EXISTS term (
     order_values text[],  -- 등급 순서. 배열 순서가 곧 순서다
     examples     text[]
 );
+-- 2026-10-30 추가 (이미 있는 테이블에도 붙도록 ALTER로 둔다)
+ALTER TABLE term ADD COLUMN IF NOT EXISTS bundle boolean NOT NULL DEFAULT false;  -- 모든 표현이 canonical 값 전체
+ALTER TABLE term ADD COLUMN IF NOT EXISTS order_up text CHECK (order_up IN ('first', 'last'));  -- "이상" 쪽 끝
 
 CREATE TABLE IF NOT EXISTS term_canonical (
     term_id    text NOT NULL REFERENCES term (id),

@@ -4,12 +4,17 @@ import decimal
 import re
 from datetime import date, datetime
 
+from typing import Annotated
+
 import psycopg
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 
 from . import db
 from .config import settings
 from .sql_guard import SQLGuardError, validate
+from .slots import MAX_STRIKES, SLOT_ERROR_MARK, slot_violations
 from .sql_rules import name_literals, result_note, violations
 
 NAME_CANDIDATES = 5  # 없는 이름에 붙이는 부분 일치 후보 수
@@ -79,19 +84,17 @@ def _name_checks(sql: str, names: dict, lookup) -> tuple[list[str], list[str]]:
 
 
 def make_run_query(ordered: dict | None, zero_missing: frozenset = frozenset(), names: dict | None = None,
-                   name_lookup=None):
+                   name_lookup=None, slot_checks: bool = False):
     """run_query 도구를 만든다. ordered가 None이면 규칙 강제 없이(기본), 있으면 --enforce:
     검증 뒤 sql_rules.violations(zero_missing: 0이 미입력인 컬럼)와 이름 확인(names·name_lookup이 있을 때)으로
     막고(위반이면 실행하지 않음), 결과가 LIMIT에 닿거나 이름 알림이 있으면 결과 끝에 붙인다.
-    name_lookup(table, column, text, mode)는 mode 'exact'|'partial'로 저장된 값 목록을 돌려준다(db.lookup_values)."""
+    name_lookup(table, column, text, mode)는 mode 'exact'|'partial'로 저장된 값 목록을 돌려준다(db.lookup_values).
 
-    @tool
-    def run_query(query: str) -> str:
-        """PostgreSQL SELECT 쿼리를 실행하고 결과 행을 반환한다.
+    slot_checks(--enforce --slots): 그래프 상태(InjectedState)의 resolved로 확인된 등급·값 묶음과 다른 SQL도 막는다.
+    이번 턴에 칸 검사로 slots.MAX_STRIKES번 막았으면 그 뒤로는 막지 않고 알림만 붙인다(칸이 틀렸을 때 무한 반복 방지).
+    """
 
-        Args:
-            query: 실행할 단일 SELECT 문 (public 스키마의 허용 테이블만 사용).
-        """
+    def execute(query: str, state: dict | None = None) -> str:
         try:
             safe_sql = validate(query)
         except SQLGuardError as e:
@@ -105,6 +108,11 @@ def make_run_query(ordered: dict | None, zero_missing: frozenset = frozenset(), 
                 except psycopg.Error:  # 이름 확인 조회가 실패해도 본 쿼리는 실행한다
                     errors, notes = [], []
                 problems += errors
+            if state is not None and (slot_errors := slot_violations(safe_sql, state.get("resolved") or [])):
+                if _slot_strikes(state.get("messages") or []) < MAX_STRIKES:
+                    problems += slot_errors
+                else:
+                    notes += [f"\n(알림: {e})" for e in slot_errors]
             if problems:
                 return "Error: " + " ".join(problems)
         try:
@@ -114,7 +122,35 @@ def make_run_query(ordered: dict | None, zero_missing: frozenset = frozenset(), 
         text = format_rows(columns, rows)
         return text + result_note(len(rows)) + "".join(notes) if ordered is not None else text
 
+    if slot_checks:
+        @tool
+        def run_query(query: str, state: Annotated[dict, InjectedState]) -> str:
+            """PostgreSQL SELECT 쿼리를 실행하고 결과 행을 반환한다.
+
+            Args:
+                query: 실행할 단일 SELECT 문 (public 스키마의 허용 테이블만 사용).
+            """
+            return execute(query, state)
+
+        return run_query
+
+    @tool
+    def run_query(query: str) -> str:
+        """PostgreSQL SELECT 쿼리를 실행하고 결과 행을 반환한다.
+
+        Args:
+            query: 실행할 단일 SELECT 문 (public 스키마의 허용 테이블만 사용).
+        """
+        return execute(query)
+
     return run_query
+
+
+def _slot_strikes(messages: list) -> int:
+    """이번 턴(마지막 사용자 질문 이후)에 칸 검사로 막은 횟수."""
+    start = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1) + 1
+    return sum(isinstance(m, ToolMessage) and m.text.startswith("Error:") and SLOT_ERROR_MARK in m.text
+               for m in messages[start:])
 
 
 run_query = make_run_query(None)

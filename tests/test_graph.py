@@ -339,3 +339,122 @@ def test_generate_query_uses_plan(fake_llm):
     seen = [c[0].content for c in fake_llm.calls]
     assert seen[0] == seen[1] and "## 실행 계획" not in seen[0]
     assert seen[2].startswith(seen[0]) and seen[2].endswith("이 계획대로 조회하고 답합니다.\n- 조건: X")
+
+
+# ───────────────────────── slots ─────────────────────────
+
+def test_slot_nodes_only_with_slots():
+    assert not {"analyze_question", "resolve_slots"} & set(graph.build_graph().nodes)
+    assert {"analyze_question", "resolve_slots"} <= set(graph.build_graph(slots=True).nodes)
+
+
+def test_plan_with_slots_is_error():
+    with pytest.raises(ValueError):
+        graph.build_graph(plan=True, slots=True)
+
+
+def test_analyze_question_returns_slots(fake_llm):
+    from portfolio_agent.slots import QuestionSlots
+
+    fake_llm.outputs = [QuestionSlots(names=[], grades=[], values=["MMF"])]
+    out = graph.analyze_question(BASE)
+    assert fake_llm.schemas == [QuestionSlots]
+    assert out == {"slots": {"names": [], "grades": [], "values": ["MMF"]}}
+
+
+def test_analyze_question_failure_is_empty(fake_llm):
+    fake_llm.outputs = [ValueError("parse")]
+    assert graph.analyze_question(BASE) == {"slots": {}}
+
+
+def test_resolve_slots_empty_or_failure(monkeypatch):
+    assert graph.resolve_slots({**BASE, "slots": {}}) == {"resolved": [], "resolved_text": ""}
+
+    def boom():
+        raise RuntimeError("no db")
+
+    monkeypatch.setattr(graph, "get_knowledge", boom)
+    out = graph.resolve_slots({**BASE, "slots": {"names": [], "grades": [], "values": ["x"]}})
+    assert out == {"resolved": [], "resolved_text": ""}
+
+
+def test_resolve_slots_renders(monkeypatch):
+    seen = {}
+
+    def fake_resolve(slots, kn, catalog, lookup, tables, dialogue):
+        seen.update(tables=tables, dialogue=dialogue)
+        return [{"slot": "value", "status": "confirmed", "text": "MMF", "fragment": "t.c IN ('a', 'b')"},
+                {"slot": "value", "status": "skipped", "text": "x", "fragment": ""}]
+
+    monkeypatch.setattr(graph, "get_knowledge", lambda: object())
+    monkeypatch.setattr(graph, "load_catalog", lambda: {})
+    monkeypatch.setattr(graph, "resolve", fake_resolve)
+    out = graph.resolve_slots({**BASE, "slots": {"values": ["MMF"]}}, lookup=object())
+    assert out["resolved_text"] == "- 범주 'MMF' → t.c IN ('a', 'b')"
+    assert seen == {"tables": ["prbd01n001"], "dialogue": "사용자: q"}
+
+
+def test_generate_query_uses_resolved(fake_llm):
+    """확인된 값이 있으면 프롬프트 끝에 '## 확인된 값'이 붙고, 비면 칸 없는 프롬프트와 같다."""
+    fake_llm.outputs = [_step("answer", answer="답")] * 3
+    graph.generate_query(BASE)
+    graph.generate_query({**BASE, "resolved_text": ""})
+    graph.generate_query({**BASE, "resolved_text": "- 범주 'MMF' → X"})
+    seen = [c[0].content for c in fake_llm.calls]
+    assert seen[0] == seen[1] and "## 확인된 값" not in seen[0]
+    assert seen[2].startswith(seen[0]) and seen[2].endswith("이 조각을 그대로 씁니다.\n- 범주 'MMF' → X")
+
+
+def test_enforce_appends_name_interpretation(fake_llm, monkeypatch):
+    from portfolio_agent import sql_rules
+
+    monkeypatch.setattr(sql_rules, "load_catalog", lambda: ENF_CATALOG)
+    fake_llm.outputs = [_step("answer", answer="답")]
+    resolved = [{"slot": "name", "kind": "발행기관", "text": "가나", "status": "candidates", "values": ["AAA"],
+                 "note": ""}]
+    out = graph.generate_query({**_turn_state(), "resolved": resolved}, enforce=True)["messages"][0].text
+    assert out.endswith("- 이름 해석: '가나' → 'AAA'")
+
+
+class _ScriptedLLM:
+    """실제 그래프용: 스키마별로 정해 둔 출력을 차례로 돌려준다."""
+
+    def __init__(self, outputs):
+        self.outputs, self.schemas = outputs, []
+
+    def with_structured_output(self, schema, method=None):
+        self.schemas.append(schema.__name__)
+        return self
+
+
+def test_slot_graph_end_to_end(monkeypatch):
+    """--enforce --slots 그래프: 칸은 턴마다 한 번만 뽑고, run_query가 상태의 resolved로 집합 불일치를 막는다(G4).
+    두 번 막은 뒤 세 번째는 실행하고 알림만 붙인다."""
+    from portfolio_agent import tools
+    from portfolio_agent.slots import QuestionSlots
+
+    resolved = [{"slot": "grade", "kind": "", "text": "신용등급 'AA-' 이상", "status": "confirmed",
+                 "table": "prbd01n001", "column": "crd_grd", "values": ["AAA", "AA+"], "note": "",
+                 "fragment": "prbd01n001.crd_grd IN ('AAA', 'AA+')"}]
+    bad = "SELECT COUNT(*) FROM prbd01n001 WHERE crd_grd = 'AAA'"
+    outputs = [graph.TableSelection(tables=["prbd01n001"]), QuestionSlots(names=[], grades=[], values=[]),
+               _step(sql=bad), _step(sql=bad), _step(sql=bad), graph.FinalAnswer(answer="끝")]
+    llm = _ScriptedLLM(outputs)
+    monkeypatch.setattr(graph, "get_llm", lambda: llm)
+    monkeypatch.setattr(graph, "invoke_with_retry", lambda runnable, messages: outputs.pop(0))
+    monkeypatch.setattr(graph, "schema_card", lambda tables: "(카드)")
+    monkeypatch.setattr(graph, "table_overview", lambda: "(개요)")
+    def resolve_slots(state):  # 노드 이름은 함수 이름에서 온다
+        return {"resolved": resolved, "resolved_text": "- x"}
+
+    monkeypatch.setattr(graph, "resolve_slots", resolve_slots)
+    monkeypatch.setattr(graph, "_enforce_tool", lambda slot_checks=False: tools.make_run_query(
+        {}, slot_checks=slot_checks))
+    monkeypatch.setattr(tools.db, "fetch", lambda sql: (["n"], [(1,)]))
+    agent = graph.build_graph(enforce=True, slots=True)
+    final = agent.invoke({"messages": [HumanMessage("q")]})
+    results = [m.text for m in final["messages"] if isinstance(m, ToolMessage)]
+    assert [r.startswith("Error:") for r in results] == [True, True, False]
+    assert "crd_grd IN ('AAA', 'AA+')" in results[0] and results[2].endswith("이 조각을 그대로 쓰세요.)")
+    assert llm.schemas.count("QuestionSlots") == 1
+    assert final["messages"][-1].text == "끝"

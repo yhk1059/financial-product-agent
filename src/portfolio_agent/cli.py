@@ -7,6 +7,7 @@
     uv run portfolio-agent --ontology abc   # 온톨로지 지식을 프롬프트에 넣음 (off|ab|abc, 기본 off)
     uv run portfolio-agent --enforce        # 규칙을 코드가 강제 (DESC NULLS LAST, 등급·시각 함수 오류, [적용 조건])
     uv run portfolio-agent --plan           # SQL을 쓰기 전에 실행 계획(plan_query)을 세움
+    uv run portfolio-agent --slots          # 질문의 이름·등급·범주 값을 칸으로 뽑아 코드가 SQL 조각으로 바꿈 (--plan과 함께 못 씀)
 """
 
 import argparse
@@ -60,6 +61,8 @@ class AskTrace:
     max_input_tokens: int | None = None  # LLM 호출 하나의 input 토큰 최대값
     knowledge_layers: dict = field(default_factory=dict)  # 온톨로지 층별 항목 id (off면 빈 dict)
     query_plan: str = ""  # plan_query의 실행 계획 (--plan이 아니면 빈 문자열)
+    slots: dict = field(default_factory=dict)          # analyze_question 원출력 (--slots가 아니면 빈 dict)
+    resolved: list[dict] = field(default_factory=list)  # 칸별 처리 결과 (slots.resolve)
     seconds: float = 0.0
     retry_wait_seconds: float = 0.0
     generation_errors: list[str] = field(default_factory=list)  # generate_query 구조화 출력이 두 번 다 이상했던 기록
@@ -91,6 +94,15 @@ def ask(agent, question: str, thread_id: str, show_sql: bool = False,
                     layers = trace.knowledge_layers
                     print(f"  [knowledge] C층 {len(layers.get('C', []))}개, 확장 {len(layers.get('expanded', []))}개"
                           + ("" if layers else " (조립 실패, 온톨로지 없이 진행)"))
+            elif node == "analyze_question":
+                trace.slots = data.get("slots") or {}
+                if show_sql:
+                    print(f"  [slots] {trace.slots or '(칸 없음)'}")
+            elif node == "resolve_slots":
+                trace.resolved = data.get("resolved") or []
+                if show_sql:
+                    for r in trace.resolved:
+                        print(f"  [resolved] {r['text']} → {r['status']} {r.get('fragment') or r.get('note') or ''}")
             elif node == "plan_query":
                 trace.query_plan = data.get("plan") or ""
                 if show_sql:
@@ -137,9 +149,11 @@ def main() -> None:
                         help="온톨로지 지식: off(넣지 않음), ab(테이블·공통), abc(+질문 검색)")
     parser.add_argument("--enforce", action="store_true", help="규칙 강제(sql_rules): 재작성·오류 지적·적용 조건 공시")
     parser.add_argument("--plan", action="store_true", help="SQL 작성 전 실행 계획(plan_query) 단계 사용")
+    parser.add_argument("--slots", action="store_true", help="질문 칸 추출(analyze_question)과 코드 처리(resolve_slots) 사용")
     args = parser.parse_args()
 
-    agent = build_chat_agent(check=args.check, ontology=args.ontology, enforce=args.enforce, plan=args.plan)
+    agent = build_chat_agent(check=args.check, ontology=args.ontology, enforce=args.enforce, plan=args.plan,
+                             slots=args.slots)
     thread_id = str(uuid.uuid4())
 
     if args.question:

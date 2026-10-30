@@ -1,11 +1,18 @@
 """LangGraph SQL 에이전트 그래프.
 
-START → select_tables → [retrieve_knowledge] → [plan_query] → generate_query ─┬─(도구 호출 없음)→ END
-                                                                   ↑          └─(도구 호출)→ [check_query | count_attempt] → run_query ─┘
+START → select_tables → [retrieve_knowledge] → [plan_query | analyze_question → resolve_slots] → generate_query ─┬─(도구 호출 없음)→ END
+                                                                                    ↑          └─(도구 호출)→ [check_query | count_attempt] → run_query ─┘
 
 plan_query(--plan, 기본 끔)는 SQL을 쓰기 전에 조건·조회 순서·답변에 밝힐 것을 구조화 출력(QueryPlan)으로 정리한다.
 턴마다 한 번이고(재시도에는 다시 세우지 않는다), 결과는 generate_query 프롬프트 끝의 '## 실행 계획'에 들어간다.
 LLM 호출이 턴마다 하나 늘어난다.
+
+analyze_question → resolve_slots(--slots, 기본 끔, --plan과 함께 쓰지 않음; docs/plan_query_slots_design.md)는
+LLM이 질문의 이름·등급 조건·범주 값을 원문 그대로 칸(slots.QuestionSlots)에 넣고, 코드(slots.resolve)가 온톨로지·카탈로그·
+읽기 전용 DB 조회로 SQL 조각을 만들어 generate_query 프롬프트 끝의 '## 확인된 값'에 넣는다. 턴마다 한 번(재시도에는
+다시 뽑지 않는다), LLM 호출이 하나 늘어난다. 어느 쪽이 실패해도 칸 없는 프롬프트와 같다.
+enforce와 함께 쓰면 run_query가 확인된 등급·값 묶음과 다른 SQL을 막고(턴당 slots.MAX_STRIKES번까지),
+답변의 [적용 조건]에 이름 해석을 붙인다.
 
 check_query는 선택 사항(기본 끔): LLM 호출이 한 번 더 늘어 CLOVA Studio 분당 토큰 한도에 쉽게 걸린다.
 retrieve_knowledge는 온톨로지 모드(config.ONTOLOGY_MODES)가 off가 아닐 때만 넣는다(기본 off).
@@ -44,8 +51,9 @@ from pydantic import BaseModel, Field
 from .config import ALLOWED_TABLES, EVAL_ONTOLOGY_MODES, settings
 from .context import build_context, get_knowledge
 from .llm import get_llm, invoke_with_retry
-from .prompts import check_prompt, generate_prompt, plan_prompt, select_prompt
-from .schema_catalog import schema_card, table_overview
+from .prompts import ANALYZE_QUESTION, check_prompt, generate_prompt, plan_prompt, select_prompt
+from .schema_catalog import load_catalog, schema_card, table_overview
+from .slots import QuestionSlots, name_notes, render_resolved, resolve
 from . import db
 from .search import search
 from .sql_rules import applied_conditions, name_columns, ordered_columns, rewrite, zero_missing_columns
@@ -64,6 +72,9 @@ class AgentState(MessagesState):
     knowledge_layers: dict  # 층별 항목 id (보고용)
     oracle_ids: list[str]   # oracle 모드에서 C층으로 쓸 항목 id (평가 스크립트가 입력으로 넣음)
     plan: str               # plan_query가 세운 이번 턴의 실행 계획. 비면 generate_query 프롬프트는 계획 없는 것과 같다
+    slots: dict             # analyze_question 원출력 (QuestionSlots.model_dump()). 실패면 {}
+    resolved: list[dict]    # slots.resolve 결과. enforce 칸 검사가 읽는다
+    resolved_text: str      # '## 확인된 값' 블록 줄. 비면 generate_query 프롬프트는 칸 없는 것과 같다
 
 
 class TableSelection(BaseModel):
@@ -182,6 +193,31 @@ def plan_query(state: AgentState) -> dict:
     return {"plan": format_plan(p)}
 
 
+def analyze_question(state: AgentState) -> dict:
+    """질문에 적힌 이름·등급 조건·범주 값을 원문 그대로 뽑는다(판단하지 않는다). 실패하면 빈 칸."""
+    llm = get_llm().with_structured_output(QuestionSlots, method="json_schema")
+    try:
+        result = invoke_with_retry(llm, [SystemMessage(ANALYZE_QUESTION), HumanMessage(_recent_dialogue(state["messages"]))])
+    except Exception:
+        log.exception("question analysis failed; continuing without slots")
+        return {"slots": {}}
+    return {"slots": result.model_dump()}
+
+
+def resolve_slots(state: AgentState, lookup=None) -> dict:
+    """칸을 코드가 확인된 값(SQL 조각)으로 바꾼다. 어떤 예외든 빈 결과(칸 없는 프롬프트와 같다)."""
+    slots = state.get("slots") or {}
+    if not slots:
+        return {"resolved": [], "resolved_text": ""}
+    try:
+        resolved = resolve(slots, get_knowledge(), load_catalog(), lookup or db.DbLookup(),
+                           state.get("selected_tables") or [], _recent_dialogue(state["messages"]))
+    except Exception:
+        log.exception("slot resolution failed; continuing without slots")
+        return {"resolved": [], "resolved_text": ""}
+    return {"resolved": resolved, "resolved_text": render_resolved(resolved)}
+
+
 def _llm_history(messages: list[AnyMessage]) -> list[AnyMessage]:
     """LLM에 보낼 대화 사본: 도구 호출과 도구 결과를 글로 바꾼다 (state는 그대로 둔다).
 
@@ -243,7 +279,8 @@ def generate_query(state: AgentState, enforce: bool = False) -> dict:
     schema = _with_knowledge(state, schema_card(tables)) if tables else "(이 질문에는 테이블 조회가 필요하지 않습니다.)"
     give_up = state.get("attempts", 0) >= settings.max_query_attempts
     rules = state.get("knowledge_rules") or None
-    prompt = generate_prompt(tables, schema, give_up, rules=rules, plan=state.get("plan") or "")
+    prompt = generate_prompt(tables, schema, give_up, rules=rules, plan=state.get("plan") or "",
+                             resolved=state.get("resolved_text") or "")
     messages = [SystemMessage(prompt), *_llm_history(state["messages"])]
     step, error = _structured_step(FinalAnswer if give_up else QueryStep, messages)
     if step is None:
@@ -253,7 +290,8 @@ def generate_query(state: AgentState, enforce: bool = False) -> dict:
     if isinstance(step, FinalAnswer) or step.action == "answer":
         answer = step.answer.strip()
         if enforce:
-            answer += applied_conditions(_turn_sqls(state["messages"]))
+            sqls = _turn_sqls(state["messages"])
+            answer += applied_conditions(sqls, name_notes(state.get("resolved") or [], sqls))
         return {"messages": [AIMessage(answer)]}
     # 실행은 LLM이 아니라 코드가 정한다: run_query 도구 호출을 직접 만들어 이후 노드(검토·실행)로 넘긴다.
     msg_id = str(uuid.uuid4())
@@ -287,27 +325,31 @@ def route_after_generate(state: AgentState) -> Literal["check_query", "__end__"]
     return "check_query" if isinstance(last, AIMessage) and last.tool_calls else END
 
 
-def _enforce_tool():
+def _enforce_tool(slot_checks: bool = False):
     """enforce용 run_query. knowledge를 못 읽으면 knowledge가 필요한 검사(등급·0=미입력·이름) 없이 계속한다."""
     try:
         kn = get_knowledge()
-        return make_run_query(ordered_columns(kn), zero_missing_columns(kn), name_columns(kn), db.lookup_values)
+        return make_run_query(ordered_columns(kn), zero_missing_columns(kn), name_columns(kn), db.lookup_values,
+                              slot_checks=slot_checks)
     except Exception:
         log.exception("knowledge unavailable; skipping grade, zero and name checks")
-        return make_run_query({})
+        return make_run_query({}, slot_checks=slot_checks)
 
 
 def build_graph(checkpointer=None, check: bool = False, ontology: str = "off", enforce: bool = False,
-                plan: bool = False):
-    """enforce와 check를 함께 쓰는 것은 지원하지 않는다(check_query가 다시 쓴 SQL은 rewrite를 거치지 않는다)."""
+                plan: bool = False, slots: bool = False):
+    """enforce와 check를 함께 쓰는 것은 지원하지 않는다(check_query가 다시 쓴 SQL은 rewrite를 거치지 않는다).
+    plan과 slots도 함께 쓰지 않는다(구성 조합을 늘리지 않는다)."""
     if ontology not in EVAL_ONTOLOGY_MODES:
         raise ValueError(f"ontology는 {', '.join(EVAL_ONTOLOGY_MODES)} 중 하나여야 합니다: {ontology!r}")
+    if plan and slots:
+        raise ValueError("--plan과 --slots는 함께 쓸 수 없습니다")
     builder = StateGraph(AgentState)
     builder.add_node(select_tables)
     if enforce:
         # 노드 이름은 generate_query로 둔다: cli.ask가 이 이름에서 답변을 모은다.
         builder.add_node("generate_query", lambda s: generate_query(s, enforce=True))
-        builder.add_node("run_query", ToolNode([_enforce_tool()], name="run_query"))
+        builder.add_node("run_query", ToolNode([_enforce_tool(slot_checks=slots)], name="run_query"))
     else:
         builder.add_node(generate_query)
         builder.add_node("run_query", ToolNode([run_query], name="run_query"))
@@ -321,6 +363,12 @@ def build_graph(checkpointer=None, check: bool = False, ontology: str = "off", e
         builder.add_node(plan_query)
         builder.add_edge(prev, "plan_query")
         prev = "plan_query"
+    if slots:
+        builder.add_node(analyze_question)
+        builder.add_node(resolve_slots)
+        builder.add_edge(prev, "analyze_question")
+        builder.add_edge("analyze_question", "resolve_slots")
+        prev = "resolve_slots"
     builder.add_edge(prev, "generate_query")
     if check:
         builder.add_node(check_query)
@@ -337,6 +385,8 @@ def build_graph(checkpointer=None, check: bool = False, ontology: str = "off", e
     return builder.compile(checkpointer=checkpointer)
 
 
-def build_chat_agent(check: bool = False, ontology: str = "off", enforce: bool = False, plan: bool = False):
+def build_chat_agent(check: bool = False, ontology: str = "off", enforce: bool = False, plan: bool = False,
+                     slots: bool = False):
     """멀티턴 대화용 (InMemorySaver 체크포인터)."""
-    return build_graph(checkpointer=InMemorySaver(), check=check, ontology=ontology, enforce=enforce, plan=plan)
+    return build_graph(checkpointer=InMemorySaver(), check=check, ontology=ontology, enforce=enforce, plan=plan,
+                       slots=slots)

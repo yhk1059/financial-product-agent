@@ -96,6 +96,20 @@ decisions:
     reason: 현재 데이터에서는 매수 가능한 LOT가 종목당 1행이라 건 기준과 종목 기준의 결과가 같다. 데이터가 바뀌면 답이 달라질 수 있어 예외를 남긴다.
     evidence: [P-UNIT, 'profiling:bond_sale_lot']
 
+  - id: add-field-bundle
+    type: add_field
+    target: glossary.bundle
+    decision: 용어에 bundle(true면 어떤 표현이든 canonical 값 전체를 뜻함)을 둔다. 대상은 mmf, krw_currency, public_offering, etf, etn, pension_eligible이다.
+    reason: 칸 처리(slots)가 범주 원문을 값 묶음으로 바꿀지, 카탈로그의 값 하나로 바꿀지 기계적으로 가를 정보가 없었다. bond_classification처럼 표현이 값 하나를 가리키는 분류 용어에 canonical 전체를 내면 오해를 코드가 다시 만든다. domestic_fund_type은 '국내주식형'이 주식형 하나만 가리키므로 묶음이 아니다.
+    evidence: [P-ASSET, 'design:plan_query_slots D4']
+
+  - id: add-field-order-up
+    type: add_field
+    target: glossary.order_up
+    decision: order가 있는 용어에 order_up(first|last, "이상" 쪽 끝)을 둔다. credit_rating·risk_grade는 first다.
+    reason: 등급 범위를 코드가 자를 때 "앞쪽이 이상"을 가정했는데 명시돼 있지 않았다. 신용등급은 AAA가 앞, 위험등급은 매우 높은 위험이 앞이고 R-risk-grade-order의 이하(덜 위험)·이상(더 위험)과 맞는다.
+    evidence: [P-GRADE, 'design:plan_query_slots D5']
+
 conflicts:
   - id: conflict-overseas-zero-fee
     sources: [design.md P-ZERO, domain_rules_legacy.md]
