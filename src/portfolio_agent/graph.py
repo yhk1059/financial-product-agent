@@ -1,33 +1,27 @@
 """LangGraph SQL 에이전트 그래프.
 
-START → select_tables → [retrieve_knowledge] → [plan_query | analyze_question → resolve_slots] → generate_query ─┬─(도구 호출 없음)→ END
-                                                                                    ↑          └─(도구 호출)→ [check_query | count_attempt] → run_query ─┘
+START → select_tables → [retrieve_knowledge] → [analyze_question → resolve_slots] → generate_query ─┬─(도구 호출 없음)→ END
+                                                                                  ↑          └─(도구 호출)→ count_attempt → run_query ─┘
 
-plan_query(--plan, 기본 끔)는 SQL을 쓰기 전에 조건·조회 순서·답변에 밝힐 것을 구조화 출력(QueryPlan)으로 정리한다.
-턴마다 한 번이고(재시도에는 다시 세우지 않는다), 결과는 generate_query 프롬프트 끝의 '## 실행 계획'에 들어간다.
-LLM 호출이 턴마다 하나 늘어난다.
-
-analyze_question → resolve_slots(--slots, 기본 끔, --plan과 함께 쓰지 않음; docs/plan_query_slots_design.md)는
+analyze_question → resolve_slots(--slots, 기본 끔; docs/plan_query_slots_design.md)는
 LLM이 질문의 이름·등급 조건·범주 값을 원문 그대로 칸(slots.QuestionSlots)에 넣고, 코드(slots.resolve)가 온톨로지·카탈로그·
 읽기 전용 DB 조회로 SQL 조각을 만들어 generate_query 프롬프트 끝의 '## 확인된 값'에 넣는다. 턴마다 한 번(재시도에는
 다시 뽑지 않는다), LLM 호출이 하나 늘어난다. 어느 쪽이 실패해도 칸 없는 프롬프트와 같다.
 enforce와 함께 쓰면 run_query가 확인된 등급·값 묶음과 다른 SQL을 막고(턴당 slots.MAX_STRIKES번까지),
 답변의 [적용 조건]에 이름 해석을 붙인다.
 
-check_query는 선택 사항(기본 끔): LLM 호출이 한 번 더 늘어 CLOVA Studio 분당 토큰 한도에 쉽게 걸린다.
 retrieve_knowledge는 온톨로지 모드(config.ONTOLOGY_MODES)가 off가 아닐 때만 넣는다(기본 off).
 - ab: 선택된 테이블의 A층(개념·속성·관계, 속성 전용 규칙)과 B층(공통 규칙, 기준일)
 - abc: ab + 마지막 사용자 질문으로 검색한 C층 용어·규칙(search.search)
 - oracle(평가 전용): ab + 입력 state의 oracle_ids(문항의 정답 항목)를 C층으로. 검색이 완벽할 때를 재는 진단용
-조립된 글은 generate_query·check_query 프롬프트의 {rules} 자리와 스키마 카드 뒤에 들어간다. LLM 호출은 늘지 않는다.
+조립된 글은 generate_query 프롬프트의 {rules} 자리와 스키마 카드 뒤에 들어간다. LLM 호출은 늘지 않는다.
 
 LangGraph SQL Agent 튜토리얼 구조를 따르되, HCX-007이 tool_choice를 지원하지 않아
 - 테이블 선택은 구조화 출력(json_schema)으로,
 - 스키마 조회는 도구 호출 대신 프롬프트에 스키마 카드를 직접 넣는 방식으로,
 - SQL 생성도 도구 호출 대신 구조화 출력(QueryStep: action/sql/answer)으로 받고,
   action=query이면 코드가 run_query 도구 호출을 만들어 실행을 강제한다
-  (모델이 '조회하겠습니다'라고 글만 쓰고 끝나는 실패를 구조적으로 막는다),
-- 쿼리 검토는 구조화 출력으로 SQL을 다시 받아 도구 호출 인자를 교체하는 방식으로 구현한다.
+  (모델이 '조회하겠습니다'라고 글만 쓰고 끝나는 실패를 구조적으로 막는다).
 
 enforce(기본 끔, sql_rules)는 기계적으로 판별되는 규칙을 프롬프트 대신 코드가 맡는다. LLM 호출은 늘지 않는다.
 - generate_query가 도구 호출 SQL의 ORDER BY … DESC를 DESC NULLS LAST로 바꾼다(기록된 SQL = 실행된 SQL)
@@ -35,7 +29,6 @@ enforce(기본 끔, sql_rules)는 기계적으로 판별되는 규칙을 프롬�
   계산에 쓰기·DB에 정확히 없는 상품명/발행기관명(부분 일치 후보가 있을 때)을 Error:로 돌려주고,
   LIMIT에 닿은 결과와 정확히 없는 이름(구성종목 포함)에 알림을 붙인다
 - 최종 답변(answer·give_up) 끝에 이번 턴의 성공한 SQL에서 찾은 [적용 조건](기준일, 결측·0 제외)을 붙인다
-check_query와 함께 쓰는 것은 지원하지 않는다(check_query가 다시 쓴 SQL은 재작성을 거치지 않는다).
 """
 
 import logging
@@ -51,7 +44,7 @@ from pydantic import BaseModel, Field
 from .config import ALLOWED_TABLES, EVAL_ONTOLOGY_MODES, settings
 from .context import build_context, get_knowledge
 from .llm import get_llm, invoke_with_retry
-from .prompts import ANALYZE_QUESTION, check_prompt, generate_prompt, plan_prompt, select_prompt
+from .prompts import ANALYZE_QUESTION, generate_prompt, select_prompt
 from .schema_catalog import load_catalog, schema_card, table_overview
 from .slots import QuestionSlots, name_notes, render_resolved, resolve
 from . import db
@@ -71,7 +64,6 @@ class AgentState(MessagesState):
     knowledge_tables: str  # 스키마 카드 뒤에 붙이는 A층 블록
     knowledge_layers: dict  # 층별 항목 id (보고용)
     oracle_ids: list[str]   # oracle 모드에서 C층으로 쓸 항목 id (평가 스크립트가 입력으로 넣음)
-    plan: str               # plan_query가 세운 이번 턴의 실행 계획. 비면 generate_query 프롬프트는 계획 없는 것과 같다
     slots: dict             # analyze_question 원출력 (QuestionSlots.model_dump()). 실패면 {}
     resolved: list[dict]    # slots.resolve 결과. enforce 칸 검사가 읽는다
     resolved_text: str      # '## 확인된 값' 블록 줄. 비면 generate_query 프롬프트는 칸 없는 것과 같다
@@ -79,18 +71,6 @@ class AgentState(MessagesState):
 
 class TableSelection(BaseModel):
     tables: list[TableName] = Field(description="질문에 답하는 데 필요한 테이블 이름 목록")
-
-
-class CheckedQuery(BaseModel):
-    query: str = Field(description="검토 후 실행할 최종 SQL")
-
-
-class QueryPlan(BaseModel):
-    """plan_query 출력. SQL은 쓰지 않고, generate_query가 따를 계획만 세운다."""
-
-    conditions: str = Field(description="질문의 조건마다 거를 테이블·컬럼·값과 적용할 도메인 규칙")
-    steps: str = Field(description="조회 순서. 이름·값 확인이 먼저 필요하면 그 조회부터. 답할 수 없는 질문이면 그 이유")
-    disclose: str = Field(description="최종 답변에 밝혀야 할 것. 없으면 빈 문자열")
 
 
 class QueryStep(BaseModel):
@@ -168,29 +148,6 @@ def retrieve_knowledge(state: AgentState, mode: str) -> dict:
 def _with_knowledge(state: AgentState, card: str) -> str:
     extra = state.get("knowledge_tables")
     return card + "\n\n" + extra if extra else card
-
-
-def format_plan(p: QueryPlan) -> str:
-    lines = [("조건", p.conditions), ("조회 순서", p.steps), ("답변에 밝힐 것", p.disclose)]
-    return "\n".join(f"- {label}: {text.strip()}" for label, text in lines if text.strip())
-
-
-def plan_query(state: AgentState) -> dict:
-    """SQL을 쓰기 전에 조건·조회 순서·공시 항목을 정리한다. 턴마다 한 번(재시도에는 다시 세우지 않는다).
-
-    실패하거나 테이블이 없으면 빈 계획(계획 없는 generate_query 프롬프트와 같다).
-    """
-    tables = state.get("selected_tables") or []
-    if not tables:
-        return {"plan": ""}
-    system = plan_prompt(tables, _with_knowledge(state, schema_card(tables)), rules=state.get("knowledge_rules") or None)
-    planner = get_llm().with_structured_output(QueryPlan, method="json_schema")
-    try:
-        p = invoke_with_retry(planner, [SystemMessage(system), *_llm_history(state["messages"])])
-    except Exception:
-        log.exception("query planning failed; continuing without plan")
-        return {"plan": ""}
-    return {"plan": format_plan(p)}
 
 
 def analyze_question(state: AgentState) -> dict:
@@ -279,8 +236,7 @@ def generate_query(state: AgentState, enforce: bool = False) -> dict:
     schema = _with_knowledge(state, schema_card(tables)) if tables else "(이 질문에는 테이블 조회가 필요하지 않습니다.)"
     give_up = state.get("attempts", 0) >= settings.max_query_attempts
     rules = state.get("knowledge_rules") or None
-    prompt = generate_prompt(tables, schema, give_up, rules=rules, plan=state.get("plan") or "",
-                             resolved=state.get("resolved_text") or "")
+    prompt = generate_prompt(tables, schema, give_up, rules=rules, resolved=state.get("resolved_text") or "")
     messages = [SystemMessage(prompt), *_llm_history(state["messages"])]
     step, error = _structured_step(FinalAnswer if give_up else QueryStep, messages)
     if step is None:
@@ -293,36 +249,16 @@ def generate_query(state: AgentState, enforce: bool = False) -> dict:
             sqls = _turn_sqls(state["messages"])
             answer += applied_conditions(sqls, name_notes(state.get("resolved") or [], sqls))
         return {"messages": [AIMessage(answer)]}
-    # 실행은 LLM이 아니라 코드가 정한다: run_query 도구 호출을 직접 만들어 이후 노드(검토·실행)로 넘긴다.
+    # 실행은 LLM이 아니라 코드가 정한다: run_query 도구 호출을 직접 만들어 이후 노드(실행)로 넘긴다.
     msg_id = str(uuid.uuid4())
     sql = rewrite(step.sql.strip()) if enforce else step.sql.strip()
     call = {"name": "run_query", "args": {"query": sql}, "id": f"call_{msg_id}"}
     return {"messages": [AIMessage(content="", tool_calls=[call], id=msg_id)]}
 
 
-def check_query(state: AgentState) -> dict:
+def route_after_generate(state: AgentState) -> Literal["count_attempt", "__end__"]:
     last = state["messages"][-1]
-    checker = get_llm().with_structured_output(CheckedQuery, method="json_schema")
-    tables = state.get("selected_tables") or list(ALLOWED_TABLES)
-    system = check_prompt(_last_question(state["messages"]), tables, _with_knowledge(state, schema_card(tables)),
-                          rules=state.get("knowledge_rules") or None)
-    tool_calls = []
-    for call in last.tool_calls:
-        original = call["args"].get("query", "")
-        try:
-            checked = invoke_with_retry(checker, [SystemMessage(system), HumanMessage(original)]).query.strip()
-        except Exception:
-            log.exception("query check failed; keeping original")
-            checked = original
-        tool_calls.append({**call, "args": {"query": checked or original}})
-    # 같은 id로 반환하면 MessagesState가 원래 메시지를 교체한다.
-    revised = AIMessage(content=last.content, tool_calls=tool_calls, id=last.id)
-    return {"messages": [revised], "attempts": state.get("attempts", 0) + 1}
-
-
-def route_after_generate(state: AgentState) -> Literal["check_query", "__end__"]:
-    last = state["messages"][-1]
-    return "check_query" if isinstance(last, AIMessage) and last.tool_calls else END
+    return "count_attempt" if isinstance(last, AIMessage) and last.tool_calls else END
 
 
 def _enforce_tool(slot_checks: bool = False):
@@ -336,14 +272,9 @@ def _enforce_tool(slot_checks: bool = False):
         return make_run_query({}, slot_checks=slot_checks)
 
 
-def build_graph(checkpointer=None, check: bool = False, ontology: str = "off", enforce: bool = False,
-                plan: bool = False, slots: bool = False):
-    """enforce와 check를 함께 쓰는 것은 지원하지 않는다(check_query가 다시 쓴 SQL은 rewrite를 거치지 않는다).
-    plan과 slots도 함께 쓰지 않는다(구성 조합을 늘리지 않는다)."""
+def build_graph(checkpointer=None, ontology: str = "off", enforce: bool = False, slots: bool = False):
     if ontology not in EVAL_ONTOLOGY_MODES:
         raise ValueError(f"ontology는 {', '.join(EVAL_ONTOLOGY_MODES)} 중 하나여야 합니다: {ontology!r}")
-    if plan and slots:
-        raise ValueError("--plan과 --slots는 함께 쓸 수 없습니다")
     builder = StateGraph(AgentState)
     builder.add_node(select_tables)
     if enforce:
@@ -359,10 +290,6 @@ def build_graph(checkpointer=None, check: bool = False, ontology: str = "off", e
         builder.add_node("retrieve_knowledge", lambda s: retrieve_knowledge(s, ontology))
         builder.add_edge(prev, "retrieve_knowledge")
         prev = "retrieve_knowledge"
-    if plan:
-        builder.add_node(plan_query)
-        builder.add_edge(prev, "plan_query")
-        prev = "plan_query"
     if slots:
         builder.add_node(analyze_question)
         builder.add_node(resolve_slots)
@@ -370,23 +297,13 @@ def build_graph(checkpointer=None, check: bool = False, ontology: str = "off", e
         builder.add_edge("analyze_question", "resolve_slots")
         prev = "resolve_slots"
     builder.add_edge(prev, "generate_query")
-    if check:
-        builder.add_node(check_query)
-        builder.add_conditional_edges("generate_query", route_after_generate)
-        builder.add_edge("check_query", "run_query")
-    else:
-        builder.add_node("count_attempt", lambda s: {"attempts": s.get("attempts", 0) + 1})
-        builder.add_conditional_edges(
-            "generate_query",
-            lambda s: "count_attempt" if route_after_generate(s) == "check_query" else END,
-        )
-        builder.add_edge("count_attempt", "run_query")
+    builder.add_node("count_attempt", lambda s: {"attempts": s.get("attempts", 0) + 1})
+    builder.add_conditional_edges("generate_query", route_after_generate)
+    builder.add_edge("count_attempt", "run_query")
     builder.add_edge("run_query", "generate_query")
     return builder.compile(checkpointer=checkpointer)
 
 
-def build_chat_agent(check: bool = False, ontology: str = "off", enforce: bool = False, plan: bool = False,
-                     slots: bool = False):
+def build_chat_agent(ontology: str = "off", enforce: bool = False, slots: bool = False):
     """멀티턴 대화용 (InMemorySaver 체크포인터)."""
-    return build_graph(checkpointer=InMemorySaver(), check=check, ontology=ontology, enforce=enforce, plan=plan,
-                       slots=slots)
+    return build_graph(checkpointer=InMemorySaver(), ontology=ontology, enforce=enforce, slots=slots)

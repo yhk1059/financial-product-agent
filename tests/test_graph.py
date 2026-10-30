@@ -16,7 +16,6 @@ def test_off_has_no_retrieve_node():
 @pytest.mark.parametrize("mode", ["ab", "abc", "oracle"])
 def test_on_has_retrieve_node(mode):
     assert "retrieve_knowledge" in graph.build_graph(ontology=mode).nodes
-    assert "retrieve_knowledge" in graph.build_graph(check=True, ontology=mode).nodes
 
 
 def test_invalid_mode():
@@ -161,7 +160,7 @@ def test_query_step_makes_tool_call(fake_llm):
     call = msg.tool_calls[0]
     assert call["name"] == "run_query" and call["args"]["query"] == "SELECT 1" and call["id"]
     assert msg.id
-    assert graph.route_after_generate({"messages": [msg]}) == "check_query"
+    assert graph.route_after_generate({"messages": [msg]}) == "count_attempt"
 
 
 def test_answer_step_ends(fake_llm):
@@ -306,51 +305,11 @@ def test_enforce_graph_builds_without_knowledge(monkeypatch):
     assert "generate_query" in nodes and "run_query" in nodes
 
 
-# ── plan_query (--plan) ──
-
-def test_plan_node_only_with_plan():
-    assert "plan_query" not in graph.build_graph().nodes
-    assert "plan_query" in graph.build_graph(plan=True).nodes
-    assert "plan_query" in graph.build_graph(plan=True, ontology="abc").nodes
-
-
-def test_plan_query_formats_plan(fake_llm):
-    fake_llm.outputs = [graph.QueryPlan(conditions="등급 AA- 이상 → crd_grd IN 목록", steps="한 번 조회", disclose="")]
-    out = graph.plan_query({**BASE, "knowledge_rules": "규칙글", "knowledge_tables": "A층"})
-    assert fake_llm.schemas == [graph.QueryPlan]
-    assert out == {"plan": "- 조건: 등급 AA- 이상 → crd_grd IN 목록\n- 조회 순서: 한 번 조회"}
-    system = fake_llm.calls[0][0].content
-    assert "## 도메인 규칙\n규칙글\n" in system and "(카드)\n\nA층" in system
-
-
-def test_plan_query_failure_or_no_tables_is_empty(fake_llm):
-    fake_llm.outputs = [ValueError("parse")]
-    assert graph.plan_query(BASE) == {"plan": ""}
-    assert graph.plan_query({**BASE, "selected_tables": []}) == {"plan": ""}
-    assert len(fake_llm.calls) == 1  # 테이블이 없으면 LLM을 부르지 않는다
-
-
-def test_generate_query_uses_plan(fake_llm):
-    """계획이 있으면 프롬프트 끝에 '## 실행 계획'이 붙고, 비면 계획 없는 프롬프트와 같다."""
-    fake_llm.outputs = [_step("answer", answer="답")] * 3
-    graph.generate_query(BASE)
-    graph.generate_query({**BASE, "plan": ""})
-    graph.generate_query({**BASE, "plan": "- 조건: X"})
-    seen = [c[0].content for c in fake_llm.calls]
-    assert seen[0] == seen[1] and "## 실행 계획" not in seen[0]
-    assert seen[2].startswith(seen[0]) and seen[2].endswith("이 계획대로 조회하고 답합니다.\n- 조건: X")
-
-
 # ───────────────────────── slots ─────────────────────────
 
 def test_slot_nodes_only_with_slots():
     assert not {"analyze_question", "resolve_slots"} & set(graph.build_graph().nodes)
     assert {"analyze_question", "resolve_slots"} <= set(graph.build_graph(slots=True).nodes)
-
-
-def test_plan_with_slots_is_error():
-    with pytest.raises(ValueError):
-        graph.build_graph(plan=True, slots=True)
 
 
 def test_analyze_question_returns_slots(fake_llm):

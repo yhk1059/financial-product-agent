@@ -1,10 +1,10 @@
 """골든 데이터셋으로 에이전트를 실행·채점한다 (golden/design.md 5절).
 
-uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc|oracle] [--enforce] [--plan | --slots] [--runs 3] [--only C1-01,C4-06]
+uv run python scripts/eval_golden.py --label base [--ontology off|ab|abc|oracle] [--enforce] [--slots] [--runs 3] [--only C1-01,C4-06]
 uv run python scripts/eval_golden.py --set holdout --label x_holdout [...]   # 홀드아웃(golden/holdout_v1.yaml) 채점
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]
     # DB·LLM 없이 현재 골든 버전으로 재채점. --label을 주면 그 이름의 새 파일(_r1.jsonl, _summary.md)로 저장
-uv run python scripts/eval_golden.py --compare base check                                 # 구성별 문항 비교표
+uv run python scripts/eval_golden.py --compare base base_enf                               # 구성별 문항 비교표
 
 출력: data/golden_runs/{label}_r{i}.jsonl (문항별 실행 기록·채점), {label}_summary.md (요약)
 """
@@ -123,15 +123,12 @@ def run(args) -> None:
         ids = set(args.only.split(","))
         questions = [q for q in questions if q["id"] in ids]
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    agent = build_chat_agent(check=args.check, ontology=args.ontology, enforce=args.enforce, plan=args.plan,
-                             slots=args.slots)
+    agent = build_chat_agent(ontology=args.ontology, enforce=args.enforce, slots=args.slots)
     oracle = oracle_items() if args.ontology == "oracle" else None
     meta = {
         "label": args.label,
-        "check": args.check,
         "ontology": args.ontology,
         "enforce": args.enforce,
-        "plan": args.plan,
         "slots": args.slots,
         "model": settings.model,
         "git_rev": git_rev(),
@@ -200,10 +197,9 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
     lines = [
         f"# 골든 {rows[0].get('golden_version', VERSION)} 채점 요약: {rows[0].get('label', '-')}",
         "",
-        f"- 모델 `{rows[0].get('model')}`, git `{rows[0].get('git_rev')}`, check_query "
-        f"{'켬' if rows[0].get('check') else '끔'}, 온톨로지 `{rows[0].get('ontology', 'off')}`, "
+        f"- 모델 `{rows[0].get('model')}`, git `{rows[0].get('git_rev')}`, "
+        f"온톨로지 `{rows[0].get('ontology', 'off')}`, "
         f"enforce {'켬' if rows[0].get('enforce') else '끔'}, "
-        f"plan {'켬' if rows[0].get('plan') else '끔'}, "
         f"slots {'켬' if rows[0].get('slots') else '끔'}, "
         f"실행 {len(runs)}회 × {len(rows) // len(runs)}문항",
         f"- **문항 정답률: {_rate(sum(r['correct'] for r in rows), len(rows))}**",
@@ -361,12 +357,10 @@ def main() -> None:
     parser.add_argument("--set", choices=list(SETS), default="golden",
                         help="문항 묶음 (golden: questions_v2, holdout: holdout_v1). --rescore·--compare에도 적용")
     parser.add_argument("--label", help="구성 이름 (결과 파일 접두어, 기본 base). --rescore와 쓰면 새 이름으로 저장")
-    parser.add_argument("--check", action="store_true", help="check_query 노드 사용")
     parser.add_argument("--ontology", choices=EVAL_ONTOLOGY_MODES, default="off",
                         help="온톨로지 지식 모드 (off: 넣지 않음, ab: 테이블·공통, abc: +질문 검색, "
                              "oracle: 검색 대신 문항의 정답 항목, 진단 전용)")
     parser.add_argument("--enforce", action="store_true", help="규칙 강제(sql_rules) 사용")
-    parser.add_argument("--plan", action="store_true", help="실행 계획(plan_query) 노드 사용")
     parser.add_argument("--slots", action="store_true", help="칸 추출(analyze_question)·처리(resolve_slots) 노드 사용")
     parser.add_argument("--runs", type=int, default=1, help="같은 구성 반복 횟수 (일관성 측정)")
     parser.add_argument("--only", help="쉼표로 구분한 문항 ID")

@@ -40,12 +40,10 @@ def test_rules_none_keeps_current_prompt():
         top_k=prompts.settings.max_result_rows, rules=prompts.rules_for(tables), schema=schema)
     assert prompts.generate_prompt(tables, schema) == expected
     assert prompts.generate_prompt(tables, schema, rules=None) == expected
-    assert prompts.check_prompt("질문", tables, schema, rules=None) == prompts.check_prompt("질문", tables, schema)
 
 
 def test_rules_override():
     assert "## 도메인 규칙\nX\n" in prompts.generate_prompt(["prbd01n001"], "(스키마)", rules="X")
-    assert "## 도메인 규칙\nX\n" in prompts.check_prompt("질문", ["prbd01n001"], "(스키마)", rules="X")
 
 
 def test_generate_prompt_describes_structured_output():

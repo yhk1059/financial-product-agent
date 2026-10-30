@@ -23,11 +23,10 @@ uv run portfolio-agent -q "삼성전자를 편입한 국내 ETF는 몇 개야?" 
 ## 구조
 ```
 START → select_tables → generate_query ─┬─(도구 호출 없음)→ END
-                              ↑          └─(도구 호출)→ [check_query] → run_query ─┘
+                              ↑          └─(도구 호출)→ run_query ─┘
 ```
 - `select_tables`: 질문에 필요한 테이블을 구조화 출력으로 고릅니다.
 - `generate_query`: 선택된 테이블의 스키마 카드와 도메인 규칙을 보고 `run_query` 도구로 SQL을 실행합니다. 결과가 나오면 답변을 씁니다. 쿼리는 최대 3회까지 실행합니다.
-- `check_query`(선택, `--check`): 실행 전에 SQL을 검토합니다. LLM 호출이 늘어 기본값은 꺼져 있습니다.
 - `run_query`: `sql_guard`가 단일 SELECT 문과 허용 테이블만 통과시킵니다. 실행은 읽기 전용 세션에서 하고 타임아웃은 15초입니다.
 
 | 파일 | 역할 |

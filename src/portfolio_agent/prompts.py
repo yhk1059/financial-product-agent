@@ -77,26 +77,6 @@ GENERATE_QUERY = """당신은 금융상품 데이터를 PostgreSQL로 조회해 
 (형식: 컬럼명 타입 | 설명 | 결측률 | 값 분포 또는 범위)
 {schema}"""
 
-PLAN_QUERY = """당신은 금융상품 데이터를 PostgreSQL로 조회하기 전에 실행 계획을 세우는 분석가입니다.
-SQL은 쓰지 않습니다. 다음 단계가 이 계획을 보고 SQL을 쓰고 답합니다.
-
-## 계획에 쓸 것
-- conditions: 사용자의 최신 질문에 나온 조건을 하나도 빠짐없이 나열하고, 조건마다 어떤 테이블·컬럼·값으로 거를지와 적용할 도메인 규칙을 적습니다. 등급 순서, 기준일, 결측, 0의 의미처럼 규칙이나 스키마가 처리 방법을 정해 두었으면 그 방법을 그대로 옮겨 적습니다.
-- steps: 조회 순서를 적습니다.
-  - 질문 속 상품명·기관명 같은 이름은 데이터에 저장된 값과 다를 수 있습니다. 정확한 값을 모르면 부분 일치로 실제 값을 확인하는 조회를 먼저 둡니다.
-  - 개수·비율·평균을 구하면 무엇을 한 단위로 세는지와 분모를 적습니다.
-  - 이 데이터로 답할 수 없는 질문이면 조회하지 말라고 적고, 어떤 정보가 없어서인지 적습니다.
-- disclose: 최종 답변에 밝혀야 할 것(데이터 기준일, 결측·0 때문에 제외한 행, 이름을 어떤 값으로 해석했는지 등)을 적습니다. 없으면 빈 문자열입니다.
-
-## 도메인 규칙
-{rules}
-
-## 사용할 테이블 스키마
-(형식: 컬럼명 타입 | 설명 | 결측률 | 값 분포 또는 범위)
-{schema}"""
-
-PLAN_SECTION = "## 실행 계획\n앞 단계에서 세운 계획입니다. 이 계획대로 조회하고 답합니다.\n{plan}"
-
 ANALYZE_QUESTION = """당신은 금융상품 질문에서 특정한 말을 원문 그대로 찾아 칸에 옮기는 일을 합니다.
 무엇을 조회할지 판단하거나 SQL을 쓰지 않습니다. 대화의 마지막 사용자 질문(앞 대화를 가리키면 그 말까지)에서 찾습니다.
 
@@ -123,53 +103,20 @@ GIVE_UP = (
     "지금까지의 결과로 답할 수 있는 만큼 답하고 답하지 못한 부분과 이유를 설명하세요."
 )
 
-CHECK_QUERY = """당신은 꼼꼼한 PostgreSQL 전문가입니다. 아래 SQL을 실행 전에 검토하세요.
-
-확인할 항목:
-- 스키마에 없는 테이블·컬럼 사용 여부 (아래 스키마와 대조)
-- text 타입 컬럼을 숫자로 비교할 때 ::numeric 변환 여부
-- NULL이 많은 컬럼으로 정렬할 때 NULLS LAST 또는 IS NOT NULL 사용 여부
-- NOT IN 과 NULL, UNION 과 UNION ALL, BETWEEN 경계, 조인 조건, GROUP BY 누락
-- 아래 도메인 규칙 위반 여부
-- 질문의 의도와 쿼리가 맞는지
-
-문제가 있으면 고친 SQL을, 없으면 원래 SQL을 그대로 query 필드에 넣으세요.
-
-## 사용자 질문
-{question}
-
-## 도메인 규칙
-{rules}
-
-## 스키마
-{schema}"""
-
 
 def generate_prompt(tables: list[str], schema: str, give_up: bool = False, rules: str | None = None,
-                    plan: str = "", resolved: str = "") -> str:
+                    resolved: str = "") -> str:
     """rules가 None이면 domain_rules.md의 규칙(rules_for), 아니면 그 글(온톨로지 조립 규칙)을 넣는다.
 
-    plan(plan_query의 계획)·resolved(resolve_slots의 확인된 값)가 비면 그것 없는 프롬프트와 글자까지 같다.
+    resolved(resolve_slots의 확인된 값)가 비면 그것 없는 프롬프트와 글자까지 같다.
     """
     rules = rules_for(tables) if rules is None else rules
     prompt = GENERATE_QUERY.format(top_k=settings.max_result_rows, rules=rules, schema=schema)
-    if plan:
-        prompt += "\n\n" + PLAN_SECTION.format(plan=plan)
     if resolved:
         prompt += "\n\n" + RESOLVED_SECTION.format(resolved=resolved)
     if give_up:
         prompt += "\n\n## 주의\n" + GIVE_UP.format(n=settings.max_query_attempts)
     return prompt
-
-
-def plan_prompt(tables: list[str], schema: str, rules: str | None = None) -> str:
-    rules = rules_for(tables) if rules is None else rules
-    return PLAN_QUERY.format(rules=rules, schema=schema)
-
-
-def check_prompt(question: str, tables: list[str], schema: str, rules: str | None = None) -> str:
-    rules = rules_for(tables) if rules is None else rules
-    return CHECK_QUERY.format(question=question, rules=rules, schema=schema)
 
 
 def select_prompt(overview: str) -> str:

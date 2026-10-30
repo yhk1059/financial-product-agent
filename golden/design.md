@@ -102,7 +102,7 @@
 | `selected_tables` | `select_tables` 결과 |
 | `queries` | 실행한 `run_query` 호출 목록. 항목마다 `sql`(검토 후 최종 인자), `ok`(결과가 `Error:`로 시작하지 않음), `output`(도구 반환 텍스트) |
 | `gave_up` | `max_query_attempts`를 넘겨 포기 모드로 답했는지 |
-| `llm_calls` | LLM 호출 수. `select_tables`, `generate_query`, `check_query` 노드 실행 횟수로 셉니다. |
+| `llm_calls` | LLM 호출 수. LLM을 부르는 노드(`select_tables`, `generate_query` 등)의 실행 횟수로 셉니다. |
 | `tokens` | 응답의 `usage_metadata`가 있으면 입력·출력 토큰 합계, 없으면 `null` |
 | `seconds` | 질문 하나의 경과 시간. 429 재시도 대기가 포함되므로 `retry_wait_seconds`를 따로 기록합니다(`invoke_with_retry`에 누적 카운터 추가). |
 
@@ -171,9 +171,9 @@
 
 ### 5.9 CLI와 출력
 ```bash
-uv run python scripts/eval_golden.py --label base [--check] [--runs 3] [--only C1-01,C4-06]
+uv run python scripts/eval_golden.py --label base [--ontology abc] [--enforce] [--runs 3] [--only C1-01,C4-06]
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]   # DB·LLM 없이 현재 골든 버전으로 재채점. --label이면 새 이름으로 저장
-uv run python scripts/eval_golden.py --compare base check                       # 구성별 문항 비교표
+uv run python scripts/eval_golden.py --compare base base_enf                    # 구성별 문항 비교표
 ```
 - **JSONL 한 줄:** `id`, `category`, `difficulty`, `label`, `run`, `model`(`CLOVASTUDIO_MODEL`), `git_rev`, `golden_version`, `AskTrace` 필드, `agent_columns`·`agent_rows`(재실행 결과), 채점 결과(`exec_match`, `answer_ok`, `mentions_missing`, `forbidden_hits`, `ungrounded_numbers`, `columns_missing`, `columns_extra`, `correct`, `fail_reason`)
 - **요약 (`data/golden_runs/{label}_summary.md`):** 전체 정답률, 축별 정답률, 분류(C1~C6)·난이도별 정답률, 실패 원인 분포, 비용 합계
