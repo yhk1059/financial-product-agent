@@ -31,6 +31,7 @@ uv run python scripts/embed_ontology.py [--dry-run]      # embed changed term/ru
 uv run python scripts/eval_retrieval.py [--set golden|holdout]   # score C-layer retrieval (vector/keyword/hybrid recall@k), no HCX chat calls
 uv run python scripts/render_context.py [--label render_v2]      # assemble ontology prompt context per golden item, report prompt growth, no HCX chat calls
 uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc|oracle] [--enforce] [--plan] [--runs 3] [--only C1-01,C4-06]   # score agent on golden v2 (oracle: diagnostic only)
+uv run python scripts/eval_golden.py --set holdout --label <commit>_abc_enf_holdout --ontology abc --enforce   # same on holdout_v1 (--set also applies to --rescore/--compare)
 uv run python scripts/eval_golden.py --rescore data/golden_runs/archive/base_r1.jsonl [--write] [--label base_v2]   # rescore without DB/LLM against the current golden version
 uv run python scripts/eval_golden.py --compare base check                                    # per-question table across labels
 ```

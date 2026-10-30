@@ -1,6 +1,7 @@
 """골든 데이터셋으로 에이전트를 실행·채점한다 (golden/design.md 5절).
 
 uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc|oracle] [--enforce] [--plan] [--runs 3] [--only C1-01,C4-06]
+uv run python scripts/eval_golden.py --set holdout --label x_holdout [...]   # 홀드아웃(golden/holdout_v1.yaml) 채점
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]
     # DB·LLM 없이 현재 골든 버전으로 재채점. --label을 주면 그 이름의 새 파일(_r1.jsonl, _summary.md)로 저장
 uv run python scripts/eval_golden.py --compare base check                                 # 구성별 문항 비교표
@@ -29,16 +30,23 @@ VERSION = "v2"
 GOLDEN_DIR = PROJECT_ROOT / "golden"
 RUNS_DIR = PROJECT_ROOT / "data" / "golden_runs"
 CATEGORIES = ["C1", "C2", "C3", "C4", "C5", "C6"]
+HOLDOUT_VERSION = "holdout_v1"
+# 문항 묶음 → (버전 표기, 문항 파일, 정답 스냅샷). 홀드아웃은 고치지 않는다(바꾸면 holdout_v2로 올린다)
+SETS = {
+    "golden": (VERSION, f"questions_{VERSION}.yaml", f"gold_results_{VERSION}.json"),
+    "holdout": (HOLDOUT_VERSION, f"{HOLDOUT_VERSION}.yaml", f"gold_results_{HOLDOUT_VERSION}.json"),
+}
 
 
-def load_golden() -> tuple[list[dict], dict]:
-    questions = yaml.safe_load((GOLDEN_DIR / f"questions_{VERSION}.yaml").read_text())
-    gold = json.loads((GOLDEN_DIR / f"gold_results_{VERSION}.json").read_text())
+def load_golden(qset: str = "golden") -> tuple[list[dict], dict]:
+    _, qfile, gfile = SETS[qset]
+    questions = yaml.safe_load((GOLDEN_DIR / qfile).read_text())
+    gold = json.loads((GOLDEN_DIR / gfile).read_text())
     stale = [q["id"] for q in questions if q["id"] not in gold or gold[q["id"]].get("sql_sha") != sql_sha(q)]
     if stale:
         raise SystemExit(
             f"정답 스냅샷이 질문 파일과 맞지 않습니다: {', '.join(stale)}\n"
-            "먼저 `uv run python scripts/verify_golden.py`를 실행하세요."
+            "먼저 `uv run python scripts/verify_golden.py`를 실행하세요(홀드아웃은 --questions/--out)."
         )
     return questions, gold
 
@@ -109,7 +117,7 @@ def print_row(r: dict) -> None:
 def run(args) -> None:
     from portfolio_agent.graph import build_chat_agent
 
-    questions, gold = load_golden()
+    questions, gold = load_golden(args.set)
     if args.only:
         ids = set(args.only.split(","))
         questions = [q for q in questions if q["id"] in ids]
@@ -124,7 +132,7 @@ def run(args) -> None:
         "plan": args.plan,
         "model": settings.model,
         "git_rev": git_rev(),
-        "golden_version": VERSION,
+        "golden_version": SETS[args.set][0],
     }
     rows = []
     for i in range(1, args.runs + 1):
@@ -146,7 +154,7 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 def rescore(args) -> None:
-    questions, gold = load_golden()
+    questions, gold = load_golden(args.set)
     qmap = {q["id"]: q for q in questions}
     path = Path(args.rescore)
     rows = read_jsonl(path)
@@ -157,7 +165,7 @@ def rescore(args) -> None:
     changed = []
     for r in rows:
         before = r.get("correct")
-        r["golden_version"] = VERSION
+        r["golden_version"] = SETS[args.set][0]
         r.update(grade(qmap[r["id"]], gold.get(r["id"]), r))
         if before != r["correct"]:
             changed.append(f"{r['id']}:{'X→O' if r['correct'] else 'O→X'}")
@@ -187,7 +195,7 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
     with_mention = [r for r in rows if qmap[r["id"]].get("must_mention")]
     judged = [r for r in sql_rows if r.get("answer_ok") is not None]
     lines = [
-        f"# 골든 {VERSION} 채점 요약: {rows[0].get('label', '-')}",
+        f"# 골든 {rows[0].get('golden_version', VERSION)} 채점 요약: {rows[0].get('label', '-')}",
         "",
         f"- 모델 `{rows[0].get('model')}`, git `{rows[0].get('git_rev')}`, check_query "
         f"{'켬' if rows[0].get('check') else '끔'}, 온톨로지 `{rows[0].get('ontology', 'off')}`, "
@@ -276,9 +284,9 @@ def write_summary(label: str, rows: list[dict], questions: list[dict]) -> None:
     print(f"요약 저장: {path}")
 
 
-def compare(labels: list[str]) -> None:
+def compare(labels: list[str], qset: str = "golden") -> None:
     """구성별로 문항 정답 여부(여러 회면 정답 횟수)를 나란히 놓는다."""
-    questions, _ = load_golden()
+    questions, _ = load_golden(qset)
     tables = {}
     for label in labels:
         files = sorted(RUNS_DIR.glob(f"{label}_r*.jsonl"))
@@ -306,6 +314,8 @@ def compare(labels: list[str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="골든 데이터셋 채점")
+    parser.add_argument("--set", choices=list(SETS), default="golden",
+                        help="문항 묶음 (golden: questions_v2, holdout: holdout_v1). --rescore·--compare에도 적용")
     parser.add_argument("--label", help="구성 이름 (결과 파일 접두어, 기본 base). --rescore와 쓰면 새 이름으로 저장")
     parser.add_argument("--check", action="store_true", help="check_query 노드 사용")
     parser.add_argument("--ontology", choices=EVAL_ONTOLOGY_MODES, default="off",
@@ -322,7 +332,7 @@ def main() -> None:
     if args.rescore:
         rescore(args)
     elif args.compare:
-        compare(args.compare)
+        compare(args.compare, args.set)
     else:
         args.label = args.label or "base"
         run(args)
