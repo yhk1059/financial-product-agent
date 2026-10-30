@@ -38,6 +38,8 @@ class Settings:
     max_result_rows: int = 50  # LLM에 돌려주는 최대 행 수
     max_result_chars: int = 8_000
     max_query_attempts: int = 3
+    # P-DATE(golden/design.md): 만기·기간 계산의 기준일은 오늘이 아니라 데이터 기준일이다.
+    as_of_date: str = "2026-08-21"
 
 
 settings = Settings()

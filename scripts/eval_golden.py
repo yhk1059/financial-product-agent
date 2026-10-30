@@ -1,6 +1,6 @@
 """골든 데이터셋으로 에이전트를 실행·채점한다 (golden/design.md 5절).
 
-uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc|oracle] [--runs 3] [--only C1-01,C4-06]
+uv run python scripts/eval_golden.py --label base [--check] [--ontology off|ab|abc|oracle] [--enforce] [--plan] [--runs 3] [--only C1-01,C4-06]
 uv run python scripts/eval_golden.py --rescore data/golden_runs/base_r1.jsonl [--write] [--label base_v2]
     # DB·LLM 없이 현재 골든 버전으로 재채점. --label을 주면 그 이름의 새 파일(_r1.jsonl, _summary.md)로 저장
 uv run python scripts/eval_golden.py --compare base check                                 # 구성별 문항 비교표
@@ -114,12 +114,14 @@ def run(args) -> None:
         ids = set(args.only.split(","))
         questions = [q for q in questions if q["id"] in ids]
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    agent = build_chat_agent(check=args.check, ontology=args.ontology)
+    agent = build_chat_agent(check=args.check, ontology=args.ontology, enforce=args.enforce, plan=args.plan)
     oracle = oracle_items() if args.ontology == "oracle" else None
     meta = {
         "label": args.label,
         "check": args.check,
         "ontology": args.ontology,
+        "enforce": args.enforce,
+        "plan": args.plan,
         "model": settings.model,
         "git_rev": git_rev(),
         "golden_version": VERSION,
@@ -189,6 +191,8 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
         "",
         f"- 모델 `{rows[0].get('model')}`, git `{rows[0].get('git_rev')}`, check_query "
         f"{'켬' if rows[0].get('check') else '끔'}, 온톨로지 `{rows[0].get('ontology', 'off')}`, "
+        f"enforce {'켬' if rows[0].get('enforce') else '끔'}, "
+        f"plan {'켬' if rows[0].get('plan') else '끔'}, "
         f"실행 {len(runs)}회 × {len(rows) // len(runs)}문항",
         f"- **문항 정답률: {_rate(sum(r['correct'] for r in rows), len(rows))}**",
         "",
@@ -307,6 +311,8 @@ def main() -> None:
     parser.add_argument("--ontology", choices=EVAL_ONTOLOGY_MODES, default="off",
                         help="온톨로지 지식 모드 (off: 넣지 않음, ab: 테이블·공통, abc: +질문 검색, "
                              "oracle: 검색 대신 문항의 정답 항목, 진단 전용)")
+    parser.add_argument("--enforce", action="store_true", help="규칙 강제(sql_rules) 사용")
+    parser.add_argument("--plan", action="store_true", help="실행 계획(plan_query) 노드 사용")
     parser.add_argument("--runs", type=int, default=1, help="같은 구성 반복 횟수 (일관성 측정)")
     parser.add_argument("--only", help="쉼표로 구분한 문항 ID")
     parser.add_argument("--rescore", help="저장된 JSONL을 DB·LLM 없이 다시 채점")

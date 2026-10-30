@@ -50,8 +50,9 @@ GENERATE_QUERY = """당신은 금융상품 데이터를 PostgreSQL로 조회해 
 1. 데이터 조회가 필요하면 action="query"로 두고 sql에 실행할 SELECT 문 하나를 넣습니다. 시스템이 실행해 결과를 대화에 [실행 결과]로 붙여 줍니다.
 2. 대화에 [실행 결과]가 있고 그것으로 답하기에 충분하면 action="answer"로 두고 answer에 최종 답변을 씁니다.
 3. 오류가 나거나 결과가 이상하면 SQL을 고쳐 다시 action="query"로 응답합니다. 오류 메시지에 >>…<<로 표시된 부분이 오류 위치이니 그 부분을 고칩니다.
-4. 데이터 조회가 필요 없거나 이 데이터로 답할 수 없는 질문이면 조회 없이 action="answer"로 답합니다.
-5. 조회할 거라면 '조회하겠습니다'라고 쓰지 말고 바로 sql을 채웁니다.
+4. 결과가 0건이면 바로 답하지 않습니다. 질문 속 이름이나 값이 데이터에 저장된 값과 다를 수 있으니, 부분 일치(LIKE) 등으로 실제 값을 먼저 확인하고 그 값으로 다시 조회합니다. 확인해도 0건이면 그때 0건이라고 답합니다.
+5. 데이터 조회가 필요 없거나 이 데이터로 답할 수 없는 질문이면 조회 없이 action="answer"로 답합니다.
+6. 조회할 거라면 '조회하겠습니다'라고 쓰지 말고 바로 sql을 채웁니다.
 
 ## SQL 규칙
 - PostgreSQL 문법, 단일 SELECT 문만 사용합니다(INSERT/UPDATE/DELETE/DDL 금지).
@@ -67,7 +68,6 @@ GENERATE_QUERY = """당신은 금융상품 데이터를 PostgreSQL로 조회해 
 - 반드시 [실행 결과]에 있는 값만 근거로 답합니다. 결과에 없는 수치를 지어내지 않습니다.
 - 목록은 마크다운 표로, 핵심 결론은 첫 문장에 씁니다.
 - 데이터 기준일과, 결측 때문에 제외된 상품이 있으면 그 사실을 밝힙니다.
-- 결과가 0건이면 조건을 확인해 보라고 안내합니다.
 - 투자 권유나 매수·매도 추천은 하지 않고, 데이터 사실만 전달합니다.
 
 ## 도메인 규칙
@@ -76,6 +76,26 @@ GENERATE_QUERY = """당신은 금융상품 데이터를 PostgreSQL로 조회해 
 ## 사용할 테이블 스키마
 (형식: 컬럼명 타입 | 설명 | 결측률 | 값 분포 또는 범위)
 {schema}"""
+
+PLAN_QUERY = """당신은 금융상품 데이터를 PostgreSQL로 조회하기 전에 실행 계획을 세우는 분석가입니다.
+SQL은 쓰지 않습니다. 다음 단계가 이 계획을 보고 SQL을 쓰고 답합니다.
+
+## 계획에 쓸 것
+- conditions: 사용자의 최신 질문에 나온 조건을 하나도 빠짐없이 나열하고, 조건마다 어떤 테이블·컬럼·값으로 거를지와 적용할 도메인 규칙을 적습니다. 등급 순서, 기준일, 결측, 0의 의미처럼 규칙이나 스키마가 처리 방법을 정해 두었으면 그 방법을 그대로 옮겨 적습니다.
+- steps: 조회 순서를 적습니다.
+  - 질문 속 상품명·기관명 같은 이름은 데이터에 저장된 값과 다를 수 있습니다. 정확한 값을 모르면 부분 일치로 실제 값을 확인하는 조회를 먼저 둡니다.
+  - 개수·비율·평균을 구하면 무엇을 한 단위로 세는지와 분모를 적습니다.
+  - 이 데이터로 답할 수 없는 질문이면 조회하지 말라고 적고, 어떤 정보가 없어서인지 적습니다.
+- disclose: 최종 답변에 밝혀야 할 것(데이터 기준일, 결측·0 때문에 제외한 행, 이름을 어떤 값으로 해석했는지 등)을 적습니다. 없으면 빈 문자열입니다.
+
+## 도메인 규칙
+{rules}
+
+## 사용할 테이블 스키마
+(형식: 컬럼명 타입 | 설명 | 결측률 | 값 분포 또는 범위)
+{schema}"""
+
+PLAN_SECTION = "## 실행 계획\n앞 단계에서 세운 계획입니다. 이 계획대로 조회하고 답합니다.\n{plan}"
 
 GIVE_UP = (
     "쿼리 실행 횟수 한도({n}회)에 도달했습니다. 더 이상 SQL을 만들지 말고 answer만 채우세요. "
@@ -104,13 +124,24 @@ CHECK_QUERY = """당신은 꼼꼼한 PostgreSQL 전문가입니다. 아래 SQL�
 {schema}"""
 
 
-def generate_prompt(tables: list[str], schema: str, give_up: bool = False, rules: str | None = None) -> str:
-    """rules가 None이면 domain_rules.md의 규칙(rules_for), 아니면 그 글(온톨로지 조립 규칙)을 넣는다."""
+def generate_prompt(tables: list[str], schema: str, give_up: bool = False, rules: str | None = None,
+                    plan: str = "") -> str:
+    """rules가 None이면 domain_rules.md의 규칙(rules_for), 아니면 그 글(온톨로지 조립 규칙)을 넣는다.
+
+    plan(plan_query의 계획)이 비면 계획 없는 프롬프트와 글자까지 같다.
+    """
     rules = rules_for(tables) if rules is None else rules
     prompt = GENERATE_QUERY.format(top_k=settings.max_result_rows, rules=rules, schema=schema)
+    if plan:
+        prompt += "\n\n" + PLAN_SECTION.format(plan=plan)
     if give_up:
         prompt += "\n\n## 주의\n" + GIVE_UP.format(n=settings.max_query_attempts)
     return prompt
+
+
+def plan_prompt(tables: list[str], schema: str, rules: str | None = None) -> str:
+    rules = rules_for(tables) if rules is None else rules
+    return PLAN_QUERY.format(rules=rules, schema=schema)
 
 
 def check_prompt(question: str, tables: list[str], schema: str, rules: str | None = None) -> str:

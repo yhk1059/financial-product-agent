@@ -10,6 +10,7 @@ from langchain_core.tools import tool
 from . import db
 from .config import settings
 from .sql_guard import SQLGuardError, validate
+from .sql_rules import result_note, violations
 
 
 def _fmt(v) -> str:
@@ -52,19 +53,31 @@ def db_error_message(e: psycopg.Error, sql: str) -> str:
     return f"Error: {msg}{hint}{where}"
 
 
-@tool
-def run_query(query: str) -> str:
-    """PostgreSQL SELECT 쿼리를 실행하고 결과 행을 반환한다.
+def make_run_query(ordered: dict | None):
+    """run_query 도구를 만든다. ordered가 None이면 규칙 강제 없이(기본), 있으면 --enforce:
+    검증 뒤 sql_rules.violations로 막고(위반이면 실행하지 않음), 결과가 LIMIT에 닿으면 알림을 붙인다."""
 
-    Args:
-        query: 실행할 단일 SELECT 문 (public 스키마의 허용 테이블만 사용).
-    """
-    try:
-        safe_sql = validate(query)
-    except SQLGuardError as e:
-        return f"Error: {e}"
-    try:
-        columns, rows = db.fetch(safe_sql)
-    except psycopg.Error as e:
-        return db_error_message(e, safe_sql)
-    return format_rows(columns, rows)
+    @tool
+    def run_query(query: str) -> str:
+        """PostgreSQL SELECT 쿼리를 실행하고 결과 행을 반환한다.
+
+        Args:
+            query: 실행할 단일 SELECT 문 (public 스키마의 허용 테이블만 사용).
+        """
+        try:
+            safe_sql = validate(query)
+        except SQLGuardError as e:
+            return f"Error: {e}"
+        if ordered is not None and (problems := violations(safe_sql, ordered)):
+            return "Error: " + " ".join(problems)
+        try:
+            columns, rows = db.fetch(safe_sql)
+        except psycopg.Error as e:
+            return db_error_message(e, safe_sql)
+        text = format_rows(columns, rows)
+        return text + result_note(len(rows)) if ordered is not None else text
+
+    return run_query
+
+
+run_query = make_run_query(None)

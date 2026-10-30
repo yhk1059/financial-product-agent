@@ -5,6 +5,8 @@
     uv run portfolio-agent -q "질문"     # 한 번만 질문
     uv run portfolio-agent --show-sql   # 실행한 SQL도 출력
     uv run portfolio-agent --ontology abc   # 온톨로지 지식을 프롬프트에 넣음 (off|ab|abc, 기본 off)
+    uv run portfolio-agent --enforce        # 규칙을 코드가 강제 (DESC NULLS LAST, 등급·시각 함수 오류, [적용 조건])
+    uv run portfolio-agent --plan           # SQL을 쓰기 전에 실행 계획(plan_query)을 세움
 """
 
 import argparse
@@ -57,6 +59,7 @@ class AskTrace:
     input_tokens: int | None = None
     max_input_tokens: int | None = None  # LLM 호출 하나의 input 토큰 최대값
     knowledge_layers: dict = field(default_factory=dict)  # 온톨로지 층별 항목 id (off면 빈 dict)
+    query_plan: str = ""  # plan_query의 실행 계획 (--plan이 아니면 빈 문자열)
     seconds: float = 0.0
     retry_wait_seconds: float = 0.0
     generation_errors: list[str] = field(default_factory=list)  # generate_query 구조화 출력이 두 번 다 이상했던 기록
@@ -88,6 +91,10 @@ def ask(agent, question: str, thread_id: str, show_sql: bool = False,
                     layers = trace.knowledge_layers
                     print(f"  [knowledge] C층 {len(layers.get('C', []))}개, 확장 {len(layers.get('expanded', []))}개"
                           + ("" if layers else " (조립 실패, 온톨로지 없이 진행)"))
+            elif node == "plan_query":
+                trace.query_plan = data.get("plan") or ""
+                if show_sql:
+                    print("  [plan] " + (trace.query_plan.replace("\n", "\n         ") or "(계획 없음)"))
             for m in data.get("messages", []):
                 if isinstance(m, AIMessage) and m.tool_calls:
                     for call in m.tool_calls:
@@ -128,9 +135,11 @@ def main() -> None:
     parser.add_argument("--check", action="store_true", help="실행 전 쿼리 검토(check_query) 단계 사용")
     parser.add_argument("--ontology", choices=ONTOLOGY_MODES, default="off",
                         help="온톨로지 지식: off(넣지 않음), ab(테이블·공통), abc(+질문 검색)")
+    parser.add_argument("--enforce", action="store_true", help="규칙 강제(sql_rules): 재작성·오류 지적·적용 조건 공시")
+    parser.add_argument("--plan", action="store_true", help="SQL 작성 전 실행 계획(plan_query) 단계 사용")
     args = parser.parse_args()
 
-    agent = build_chat_agent(check=args.check, ontology=args.ontology)
+    agent = build_chat_agent(check=args.check, ontology=args.ontology, enforce=args.enforce, plan=args.plan)
     thread_id = str(uuid.uuid4())
 
     if args.question:

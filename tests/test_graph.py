@@ -243,3 +243,99 @@ def test_ask_records_generation_error():
     trace = cli.ask(FakeAgent(), "q", "t")
     assert trace.generation_errors == ["오류 요약"]
     assert trace.answer == graph.GENERATION_FAILED and trace.queries == []
+
+
+# ───────────────────────── enforce ─────────────────────────
+
+ENF_CATALOG = {"tables": {"prbd01n001": {"columns": [
+    {"name": "crd_grd", "comment": "적용신용등급", "null_pct": 18.4},
+    {"name": "pd_nm", "comment": "상품명", "null_pct": 0.0},
+]}}}
+
+
+def _turn_state(attempts=1):
+    """지난 턴의 성공 SQL, 이번 턴의 실패 SQL과 성공 SQL이 든 대화."""
+    def call(cid, sql):
+        return AIMessage(content="", tool_calls=[{"name": "run_query", "args": {"query": sql}, "id": cid}], id=cid)
+
+    return {**BASE, "attempts": attempts, "messages": [
+        HumanMessage("지난 질문"),
+        call("c0", "SELECT pd_nm FROM prbd01n001 WHERE pd_nm IS NOT NULL AND expr_dt > DATE '2026-08-21'"),
+        ToolMessage("1행", tool_call_id="c0"),
+        AIMessage("지난 답"),
+        HumanMessage("q"),
+        call("c1", "SELECT COUNT(*) FROM prbd01n001 WHERE crd_grd >= 'AA-'"),
+        ToolMessage("Error: 등급", tool_call_id="c1"),
+        call("c2", "SELECT COUNT(*) FROM prbd01n001 WHERE crd_grd IS NOT NULL AND crd_grd IN ('AAA')"),
+        ToolMessage("count\n3\n(1행)", tool_call_id="c2"),
+    ]}
+
+
+def test_turn_sqls_only_this_turn_successes():
+    assert graph._turn_sqls(_turn_state()["messages"]) == [
+        "SELECT COUNT(*) FROM prbd01n001 WHERE crd_grd IS NOT NULL AND crd_grd IN ('AAA')"]
+
+
+def test_enforce_rewrites_tool_call_sql(fake_llm):
+    fake_llm.outputs = [_step("query", sql="SELECT pd_nm FROM prbd01n001 ORDER BY crd_grd DESC")] * 2
+    on = graph.generate_query(BASE, enforce=True)["messages"][0].tool_calls[0]["args"]["query"]
+    off = graph.generate_query(BASE)["messages"][0].tool_calls[0]["args"]["query"]
+    assert on.endswith("ORDER BY crd_grd DESC NULLS LAST")
+    assert off == "SELECT pd_nm FROM prbd01n001 ORDER BY crd_grd DESC"
+
+
+@pytest.mark.parametrize("give_up", [False, True])
+def test_enforce_appends_applied_conditions(fake_llm, monkeypatch, give_up):
+    from portfolio_agent import sql_rules
+    monkeypatch.setattr(sql_rules, "load_catalog", lambda: ENF_CATALOG)
+    state = _turn_state(graph.settings.max_query_attempts if give_up else 1)
+    out = graph.FinalAnswer(answer="3개입니다.") if give_up else _step("answer", answer="3개입니다.")
+    fake_llm.outputs = [out, out]
+    on = graph.generate_query(state, enforce=True)["messages"][0].text
+    off = graph.generate_query(state)["messages"][0].text
+    assert on == "3개입니다.\n\n[적용 조건]\n- 적용신용등급: 값이 없는 행 제외"  # 지난 턴의 기준일은 넣지 않는다
+    assert off == "3개입니다."
+
+
+def test_enforce_graph_builds_without_knowledge(monkeypatch):
+    def boom():
+        raise RuntimeError("DB 없음")
+
+    monkeypatch.setattr(graph, "get_knowledge", boom)
+    nodes = graph.build_graph(enforce=True).nodes
+    assert "generate_query" in nodes and "run_query" in nodes
+
+
+# ── plan_query (--plan) ──
+
+def test_plan_node_only_with_plan():
+    assert "plan_query" not in graph.build_graph().nodes
+    assert "plan_query" in graph.build_graph(plan=True).nodes
+    assert "plan_query" in graph.build_graph(plan=True, ontology="abc").nodes
+
+
+def test_plan_query_formats_plan(fake_llm):
+    fake_llm.outputs = [graph.QueryPlan(conditions="등급 AA- 이상 → crd_grd IN 목록", steps="한 번 조회", disclose="")]
+    out = graph.plan_query({**BASE, "knowledge_rules": "규칙글", "knowledge_tables": "A층"})
+    assert fake_llm.schemas == [graph.QueryPlan]
+    assert out == {"plan": "- 조건: 등급 AA- 이상 → crd_grd IN 목록\n- 조회 순서: 한 번 조회"}
+    system = fake_llm.calls[0][0].content
+    assert "## 도메인 규칙\n규칙글\n" in system and "(카드)\n\nA층" in system
+
+
+def test_plan_query_failure_or_no_tables_is_empty(fake_llm):
+    fake_llm.outputs = [ValueError("parse")]
+    assert graph.plan_query(BASE) == {"plan": ""}
+    assert graph.plan_query({**BASE, "selected_tables": []}) == {"plan": ""}
+    assert len(fake_llm.calls) == 1  # 테이블이 없으면 LLM을 부르지 않는다
+
+
+def test_generate_query_uses_plan(fake_llm):
+    """계획이 있으면 프롬프트 끝에 '## 실행 계획'이 붙고, 비면 계획 없는 프롬프트와 같다."""
+    fake_llm.outputs = [_step("answer", answer="답")] * 3
+    graph.generate_query(BASE)
+    graph.generate_query({**BASE, "plan": ""})
+    graph.generate_query({**BASE, "plan": "- 조건: X"})
+    seen = [c[0].content for c in fake_llm.calls]
+    assert seen[0] == seen[1] and "## 실행 계획" not in seen[0]
+    assert seen[2].startswith(seen[0]) and seen[2].endswith("이 계획대로 조회하고 답합니다.\n- 조건: X")
