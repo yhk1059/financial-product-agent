@@ -10,7 +10,9 @@ from langchain_core.tools import tool
 from . import db
 from .config import settings
 from .sql_guard import SQLGuardError, validate
-from .sql_rules import result_note, violations
+from .sql_rules import name_literals, result_note, violations
+
+NAME_CANDIDATES = 5  # 없는 이름에 붙이는 부분 일치 후보 수
 
 
 def _fmt(v) -> str:
@@ -53,9 +55,35 @@ def db_error_message(e: psycopg.Error, sql: str) -> str:
     return f"Error: {msg}{hint}{where}"
 
 
-def make_run_query(ordered: dict | None):
+def _name_checks(sql: str, names: dict, lookup) -> tuple[list[str], list[str]]:
+    """이름 컬럼에 =/IN으로 쓴 값이 DB에 정확히 있는지 본다 → (막을 오류, 결과에 붙일 알림).
+
+    정확히 없고 부분 일치 후보가 있으면 오류(후보를 보여 주고 정확히 일치시켜 다시 조회하게 한다).
+    후보도 없으면 막지 않고 알림만 붙인다(데이터에 없는 이름일 수 있다).
+    구성종목은 막지 않는다: '편입 없음'이 정답일 수 있다.
+    """
+    errors, notes = [], []
+    for kind, table, column, value in name_literals(sql, names):
+        if lookup(table, column, value, "exact"):
+            continue
+        cands = lookup(table, column, value, "partial")[:NAME_CANDIDATES]
+        shown = ", ".join(f"'{c}'" for c in cands)
+        if cands and kind != "구성종목":
+            errors.append(f"{kind} 이름 '{value}'는 {table}.{column}에 정확히 일치하는 값이 없습니다. 저장된 값 후보: {shown}. "
+                          "질문이 가리키는 것이 후보 중 하나면 그 값으로 정확히 일치시켜(=) 다시 조회하고, "
+                          "어떻게 해석했는지 답변에 밝히세요. 부분 일치(LIKE) 결과를 그대로 집계하지 않습니다.")
+        else:
+            notes.append(f"\n(알림: {kind} 이름 '{value}'는 {table}.{column}에 정확히 일치하는 값이 없음"
+                         + (f". 비슷한 표기: {shown})" if cands else ")"))
+    return errors, notes
+
+
+def make_run_query(ordered: dict | None, zero_missing: frozenset = frozenset(), names: dict | None = None,
+                   name_lookup=None):
     """run_query 도구를 만든다. ordered가 None이면 규칙 강제 없이(기본), 있으면 --enforce:
-    검증 뒤 sql_rules.violations로 막고(위반이면 실행하지 않음), 결과가 LIMIT에 닿으면 알림을 붙인다."""
+    검증 뒤 sql_rules.violations(zero_missing: 0이 미입력인 컬럼)와 이름 확인(names·name_lookup이 있을 때)으로
+    막고(위반이면 실행하지 않음), 결과가 LIMIT에 닿거나 이름 알림이 있으면 결과 끝에 붙인다.
+    name_lookup(table, column, text, mode)는 mode 'exact'|'partial'로 저장된 값 목록을 돌려준다(db.lookup_values)."""
 
     @tool
     def run_query(query: str) -> str:
@@ -68,14 +96,23 @@ def make_run_query(ordered: dict | None):
             safe_sql = validate(query)
         except SQLGuardError as e:
             return f"Error: {e}"
-        if ordered is not None and (problems := violations(safe_sql, ordered)):
-            return "Error: " + " ".join(problems)
+        notes = []
+        if ordered is not None:
+            problems = violations(safe_sql, ordered, zero_missing)
+            if names and name_lookup is not None:
+                try:
+                    errors, notes = _name_checks(safe_sql, names, name_lookup)
+                except psycopg.Error:  # 이름 확인 조회가 실패해도 본 쿼리는 실행한다
+                    errors, notes = [], []
+                problems += errors
+            if problems:
+                return "Error: " + " ".join(problems)
         try:
             columns, rows = db.fetch(safe_sql)
         except psycopg.Error as e:
             return db_error_message(e, safe_sql)
         text = format_rows(columns, rows)
-        return text + result_note(len(rows)) if ordered is not None else text
+        return text + result_note(len(rows)) + "".join(notes) if ordered is not None else text
 
     return run_query
 

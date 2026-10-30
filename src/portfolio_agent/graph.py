@@ -24,7 +24,9 @@ LangGraph SQL Agent 튜토리얼 구조를 따르되, HCX-007이 tool_choice를 
 
 enforce(기본 끔, sql_rules)는 기계적으로 판별되는 규칙을 프롬프트 대신 코드가 맡는다. LLM 호출은 늘지 않는다.
 - generate_query가 도구 호출 SQL의 ORDER BY … DESC를 DESC NULLS LAST로 바꾼다(기록된 SQL = 실행된 SQL)
-- run_query가 등급 컬럼 문자열 대소 비교·현재 시각 함수를 Error:로 돌려주고, LIMIT에 닿은 결과에 알림을 붙인다
+- run_query가 등급 컬럼 문자열 대소 비교·현재 시각 함수·0이 미입력인 컬럼(R-zero-missing)을 0 제외 없이
+  계산에 쓰기·DB에 정확히 없는 상품명/발행기관명(부분 일치 후보가 있을 때)을 Error:로 돌려주고,
+  LIMIT에 닿은 결과와 정확히 없는 이름(구성종목 포함)에 알림을 붙인다
 - 최종 답변(answer·give_up) 끝에 이번 턴의 성공한 SQL에서 찾은 [적용 조건](기준일, 결측·0 제외)을 붙인다
 check_query와 함께 쓰는 것은 지원하지 않는다(check_query가 다시 쓴 SQL은 재작성을 거치지 않는다).
 """
@@ -44,8 +46,9 @@ from .context import build_context, get_knowledge
 from .llm import get_llm, invoke_with_retry
 from .prompts import check_prompt, generate_prompt, plan_prompt, select_prompt
 from .schema_catalog import schema_card, table_overview
+from . import db
 from .search import search
-from .sql_rules import applied_conditions, ordered_columns, rewrite
+from .sql_rules import applied_conditions, name_columns, ordered_columns, rewrite, zero_missing_columns
 from .tools import make_run_query, run_query
 
 log = logging.getLogger(__name__)
@@ -284,13 +287,14 @@ def route_after_generate(state: AgentState) -> Literal["check_query", "__end__"]
     return "check_query" if isinstance(last, AIMessage) and last.tool_calls else END
 
 
-def _ordered_columns() -> dict:
-    """enforce용 등급 컬럼. knowledge를 못 읽으면 빈 dict(등급 검사 없이 계속)."""
+def _enforce_tool():
+    """enforce용 run_query. knowledge를 못 읽으면 knowledge가 필요한 검사(등급·0=미입력·이름) 없이 계속한다."""
     try:
-        return ordered_columns(get_knowledge())
+        kn = get_knowledge()
+        return make_run_query(ordered_columns(kn), zero_missing_columns(kn), name_columns(kn), db.lookup_values)
     except Exception:
-        log.exception("ordered columns unavailable; skipping grade checks")
-        return {}
+        log.exception("knowledge unavailable; skipping grade, zero and name checks")
+        return make_run_query({})
 
 
 def build_graph(checkpointer=None, check: bool = False, ontology: str = "off", enforce: bool = False,
@@ -303,7 +307,7 @@ def build_graph(checkpointer=None, check: bool = False, ontology: str = "off", e
     if enforce:
         # 노드 이름은 generate_query로 둔다: cli.ask가 이 이름에서 답변을 모은다.
         builder.add_node("generate_query", lambda s: generate_query(s, enforce=True))
-        builder.add_node("run_query", ToolNode([make_run_query(_ordered_columns())], name="run_query"))
+        builder.add_node("run_query", ToolNode([_enforce_tool()], name="run_query"))
     else:
         builder.add_node(generate_query)
         builder.add_node("run_query", ToolNode([run_query], name="run_query"))

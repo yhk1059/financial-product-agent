@@ -59,3 +59,56 @@ def test_default_has_no_rules(fetched):
     out = run_query.invoke({"query": "SELECT * FROM prbd01n001 WHERE crd_grd >= 'AA-'"})
     assert not out.startswith("Error:") and "COUNT" not in out
     assert out.endswith("(총 200행 중 50행 표시)")
+
+
+# ───────────────────────── enforce: 0 = 미입력·이름 ─────────────────────────
+
+NAMES = {("prbd01n001", "pd_pbcm"): "발행기관", ("domestic_etf_holdings", "component_name"): "구성종목"}
+STORED = {"pd_pbcm": ["(주)가나다은행", "가나다캐피탈"], "component_name": ["가나전자", "가나전자우"]}
+
+
+def fake_lookup(table, column, text, mode):
+    """저장된 값: STORED. exact는 같은 값, partial은 text를 포함하는 값."""
+    values = STORED[column]
+    return [v for v in values if (v == text if mode == "exact" else text in v)]
+
+
+def test_zero_missing_is_error_without_fetch(fetched):
+    zero = frozenset({("pref01n001", "cu_charge_rt")})
+    out = make_run_query({}, zero).invoke({"query": "SELECT AVG(cu_charge_rt::numeric) FROM pref01n001"})
+    assert out.startswith("Error: ") and "cu_charge_rt::numeric > 0" in out
+    assert fetched["calls"] == []
+
+
+def test_unknown_name_with_candidates_is_error(fetched):
+    tool = make_run_query({}, names=NAMES, name_lookup=fake_lookup)
+    out = tool.invoke({"query": "SELECT COUNT(*) FROM prbd01n001 WHERE pd_pbcm = '가나다'"})
+    assert out.startswith("Error: 발행기관 이름 '가나다'는 prbd01n001.pd_pbcm에 정확히 일치하는 값이 없습니다")
+    assert "'(주)가나다은행', '가나다캐피탈'" in out
+    assert fetched["calls"] == []
+
+
+def test_exact_name_runs(fetched):
+    tool = make_run_query({}, names=NAMES, name_lookup=fake_lookup)
+    out = tool.invoke({"query": "SELECT COUNT(*) FROM prbd01n001 WHERE pd_pbcm = '(주)가나다은행'"})
+    assert out == "n\n0\n(1행)"
+
+
+def test_unknown_name_without_candidates_runs_with_note(fetched):
+    tool = make_run_query({}, names=NAMES, name_lookup=fake_lookup)
+    out = tool.invoke({"query": "SELECT COUNT(*) FROM prbd01n001 WHERE pd_pbcm = '없는기관'"})
+    assert len(fetched["calls"]) == 1
+    assert out.endswith("(알림: 발행기관 이름 '없는기관'는 prbd01n001.pd_pbcm에 정확히 일치하는 값이 없음)")
+
+
+def test_unknown_holding_runs_with_note(fetched):
+    """구성종목은 '편입 없음'이 답일 수 있어 막지 않고 알림만 붙인다."""
+    tool = make_run_query({}, names=NAMES, name_lookup=fake_lookup)
+    out = tool.invoke({"query": "SELECT COUNT(*) FROM domestic_etf_holdings WHERE component_name = '가나'"})
+    assert len(fetched["calls"]) == 1
+    assert out.endswith("비슷한 표기: '가나전자', '가나전자우')")
+
+
+def test_name_check_off_by_default(fetched):
+    out = make_run_query({}).invoke({"query": "SELECT COUNT(*) FROM prbd01n001 WHERE pd_pbcm = '가나다'"})
+    assert out == "n\n0\n(1행)"
