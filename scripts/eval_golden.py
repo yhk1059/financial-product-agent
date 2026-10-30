@@ -11,6 +11,7 @@ uv run python scripts/eval_golden.py --compare base check                       
 
 import argparse
 import json
+import re
 import statistics
 import subprocess
 import uuid
@@ -283,9 +284,14 @@ def summary(rows: list[dict], questions: list[dict]) -> str:
 
 
 def slot_used(r: dict, sql: str) -> bool:
-    """확인된 조각이 SQL에 들어갔는가: 그 컬럼 이름과 값이 모두 SQL에 보인다(대소문자·따옴표 무시)."""
+    """확인된 조각이 SQL에 들어갔는가: 그 컬럼 이름과 값이 모두 SQL에 보인다(대소문자·따옴표 무시).
+
+    이름은 식별값(조각의 다른 문자열, 예: item_id = '…')으로 따른 것도 쓴 것으로 본다.
+    """
     text = sql.lower().replace('"', "")
-    return r["column"].lower() in text and all(f"'{v}'".lower() in text for v in r["values"])
+    if r["column"].lower() in text and all(f"'{v}'".lower() in text for v in r["values"]):
+        return True
+    return r["slot"] == "name" and any(f"'{v}'".lower() in text for v in re.findall(r"'([^']+)'", r["fragment"]))
 
 
 def slot_summary(rows: list[dict]) -> list[str]:
