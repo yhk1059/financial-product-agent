@@ -24,3 +24,4 @@ data/golden_runs/
 data/retrieval_runs/
 data/retrieval_cache/
 data/context_runs/
+data/eval_logs/
