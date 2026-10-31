@@ -24,12 +24,14 @@ uv run pytest -m "not db"                                # skip tests that need 
 uv run pytest tests/test_sql_guard.py::test_allows_select
 uv run python scripts/build_schema_cache.py              # regenerate data/schema_catalog.json after DB data changes
 uv run python scripts/verify_golden.py                   # rerun gold SQL → golden/gold_results_v2.json, review_sheet.md
+uv run python scripts/verify_golden.py --questions golden/holdout_v2.yaml --out golden/gold_results_holdout_v2.json   # holdout gold (no review_sheet)
 uv run pytest tests/test_ontology.py                     # ontology YAML structure/existence/leak/coverage checks, no DB/LLM
 uv run python scripts/load_ontology.py [--dry-run]       # reload ontology/*.yaml into the knowledge schema (--dry-run: row counts only, no DB)
 uv run python scripts/embed_ontology.py [--dry-run]      # embed changed term/rule docs into knowledge.item_embedding (--dry-run: print docs, no API/DB writes)
 uv run python scripts/eval_retrieval.py                  # score C-layer retrieval (vector/keyword/hybrid recall@k), no HCX chat calls
 uv run python scripts/render_context.py [--label render_v2]      # assemble ontology prompt context per golden item, report prompt growth, no HCX chat calls
 uv run python scripts/eval_golden.py --label base [--ontology off|ab|abc|oracle] [--enforce] [--slots] [--runs 3] [--only C1-01,C4-06]   # score agent on golden v2 (oracle: diagnostic only)
+uv run python scripts/eval_golden.py --set holdout --label <commit>_<mode>_holdout [...]   # score on holdout_v2 (30 items); never tune on it
 uv run python scripts/eval_golden.py --rescore data/golden_runs/archive/base_r1.jsonl [--write] [--label base_v2]   # rescore without DB/LLM against the current golden version
 uv run python scripts/eval_golden.py --compare base base_enf                                 # per-question table across labels
 ```
@@ -79,7 +81,7 @@ Scoring (`src/portfolio_agent/golden_eval.py`, pure functions, unit-tested in `t
 
 Outputs go to `data/golden_runs/` (gitignored). Only the current baseline stays there; older runs move to `data/golden_runs/archive/` (compare them with `--compare archive/<label> ...`). Console output (429 retries, per-item table) may be saved by redirection to `data/eval_logs/<label>.log` (gitignored; not written by the script). `golden/analysis/runs.md` lists every run with its commit, mode, score, and status; add a row for each new run. Label new runs `<commit>_<mode>[_enf][_slots][_x<runs>]` (`_enf` = `--enforce`, `_slots` = `--slots`; old `_plan` labels used the removed `--plan`, old `_holdout` labels the deleted `holdout_v1`). When changing prompts or `domain_rules.md`, rerun the eval (or `--only` the affected ids). After changing scoring rules, use `--rescore` instead of rerunning the agent.
 
-**Holdout:** none right now. `holdout_v1` (14 items) was deleted on 2026-10-31; a new 30-item holdout is planned. Past holdout scores in `runs.md` are history only.
+**Holdout:** `golden/holdout_v2.yaml` (30 items, H-01–H-30, fixed 2026-11-01) with `gold_results_holdout_v2.json`; run with `--set holdout`, label `<commit>_<mode>[_enf][_slots]_holdout`. Same categories/tables/scoring as golden, but each item asks the same policy in a different context (other column, direction, aggregate, table pair, or name), so it measures generalization of code and ontology tuned on golden. Do not tune on holdout scores: fix things on golden, then measure holdout once. Its proper nouns must not appear in the ontology or slot code (`HOLDOUT_PROPER_NOUNS` in `tests/test_ontology.py`). `tests/test_golden_schema.py` checks both sets. `holdout_v1` (14 items) was deleted on 2026-10-31; its scores in `runs.md` are history only.
 
 ## Ontology
 
