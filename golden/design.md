@@ -194,17 +194,14 @@ uv run python scripts/eval_golden.py --compare base base_enf                    
 - **v2 (현재, 2026-10-17 확정):** v1 기준선 검토에서 나온 G1·G2·S1·S3·S4 결정을 반영했습니다(8절). 정답이 바뀐 문항은 C1-01(78→33), C1-02(20→12종목), C3-03(수익률 값), C2-05(108→138)입니다. S2(`earlier`)는 채점기 규칙만 바뀝니다.
 - **다음:** 80~120문항으로 확장합니다. 확정된 문항을 바꾸면 버전을 올리고 8절에 기록합니다.
 - **정답 재생성:** 데이터가 바뀌면 `uv run python scripts/verify_golden.py`로 `gold_result`를 다시 만듭니다. 질문과 정책이 바뀌지 않았는데 결과가 달라지면 데이터 변경으로 봅니다.
-- **홀드아웃 v1 (2026-10-18 확정):** `holdout_v1.yaml`의 14문항(H-01~H-14)입니다. ontology YAML이 골든 밖으로 일반화되는지 확인하는 데 씁니다.
-  - 골든과 같은 지식을 다른 맥락(다른 테이블·유형·집계·이름)에서 묻습니다. 문항마다 검사하는 일반 지식을 `tests_knowledge`에 적습니다.
-  - 누수를 막으려고 ontology YAML을 쓰기 **전에** 고정했습니다. 확정 뒤에는 고치지 않고, 바꿔야 하면 `holdout_v2`로 올립니다.
-  - 정답: `uv run python scripts/verify_golden.py --questions golden/holdout_v1.yaml --out golden/gold_results_holdout_v1.json`. `--questions`를 주면 `review_sheet.md`는 다시 쓰지 않습니다.
+- **홀드아웃 v1 (2026-10-18 확정, 2026-10-31 삭제):** 14문항(H-01~H-14)이었으나 사용자 결정으로 프로젝트에서 삭제했습니다. 새 홀드아웃 30문항을 따로 만들 예정입니다. 과거 점수는 `analysis/runs.md`에 기록으로 남깁니다.
 - **ontology (2026-10-18 검토 완료):** 골든 30문항에서 뽑은 데이터 밖의 정의를 `ontology/`에 둡니다(『온톨로지 따라하기』 4~5장 방식).
   - `model.yaml`: 개념, 1행 단위, 식별키, 하위 개념, 속성(0·NULL의 뜻 포함), 관계
   - `glossary.yaml`: 질문 표현 → 정본(개념·속성·값 집합), 동의 표현과 혼동어
   - `rules.yaml`: 조건·시점·예외·계산 규칙
   - `review_log.yaml`: 사람의 결정과 이유, 근거 자료 충돌, 데이터 확인 기록, 검토 승인 내역
   - 추출 과정은 `analysis/extraction_worksheet.md`에 있습니다. 정의는 문항 전용이 아니라 일반 개념으로 쓰고, 문항 id는 추적용 `motivated_by`에만 둡니다. 정답 SQL은 옮겨 적지 않습니다.
-  - `tests/test_ontology.py`가 구조·실재성(`schema_catalog.json`)·누수(문항 id, 골든·홀드아웃 고유명사, 정답 SQL 술어 중복)·커버리지(골든 30문항, 홀드아웃 `tests_knowledge`)를 검사합니다.
+  - `tests/test_ontology.py`가 구조·실재성(`schema_catalog.json`)·누수(문항 id, 골든 고유명사, 정답 SQL 술어 중복)·커버리지(골든 30문항)를 검사합니다.
   - 정책·정답을 바꾸면 ontology의 해당 항목과 `review_log.yaml`도 함께 고칩니다. 에이전트 연결(프롬프트 렌더링)과 PostgreSQL 적재는 아직 하지 않았습니다.
 
 ## 7. 검토가 필요한 데이터 이슈 (v0 작성 중 발견)

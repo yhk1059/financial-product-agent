@@ -339,10 +339,10 @@ def test_empty_resolved_no_checks():
 # ───────────────────────── 누출 ─────────────────────────
 
 def test_no_proper_nouns_in_slot_code():
-    """slots.py와 칸 추출 프롬프트에 골든·홀드아웃 고유명사와 문항 id가 없어야 한다."""
-    from test_ontology import GOLDEN_PROPER_NOUNS, HOLDOUT_PROPER_NOUNS, QUESTION_ID, proper_noun_leaks
+    """slots.py와 칸 추출 프롬프트에 골든 고유명사와 문항 id가 없어야 한다."""
+    from test_ontology import GOLDEN_PROPER_NOUNS, QUESTION_ID, proper_noun_leaks
 
     texts = [inspect.getsource(slots), prompts.ANALYZE_QUESTION, prompts.RESOLVED_SECTION]
     for text in texts:
-        assert not proper_noun_leaks({"text": text}, GOLDEN_PROPER_NOUNS + HOLDOUT_PROPER_NOUNS)
+        assert not proper_noun_leaks({"text": text}, GOLDEN_PROPER_NOUNS)
         assert not QUESTION_ID.search(text), re.findall(QUESTION_ID, text)

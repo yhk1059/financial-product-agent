@@ -20,7 +20,6 @@ GLOSSARY = yaml.safe_load((ONTOLOGY / "glossary.yaml").read_text())["terms"]
 RULES = yaml.safe_load((ONTOLOGY / "rules.yaml").read_text())["rules"]
 REVIEW = yaml.safe_load((ONTOLOGY / "review_log.yaml").read_text())
 QUESTIONS = yaml.safe_load((GOLDEN / "questions_v2.yaml").read_text())
-HOLDOUT = yaml.safe_load((GOLDEN / "holdout_v1.yaml").read_text())
 POLICIES = set(re.findall(r"\*\*(P-[A-Z]+)\*\*", (GOLDEN / "design.md").read_text()))
 WORKSHEET = (GOLDEN / "analysis" / "extraction_worksheet.md").read_text()
 
@@ -37,28 +36,8 @@ DESIGN_DECISIONS = {"G1", "G2", "S1", "S2", "S3", "S4"}
 
 # 골든 질문에만 나오는 고유명사: examples 밖에 나오면 문항 전용 지식이 섞인 것이다
 GOLDEN_PROPER_NOUNS = ["에코프로", "KODEX 200", "TIGER 200", "중소기업은행", "기업은행", "삼성전자", "SK하이닉스", "마이다스"]
-# 홀드아웃 질문의 고유명사: ontology 어디에도 나오면 안 된다(홀드아웃 → 사전 누수)
-HOLDOUT_PROPER_NOUNS = ["KODEX 레버리지", "한전", "한국전력", "대한전선", "현대차", "애플", "Apple"]
 QUESTION_ID = re.compile(r"(?<![A-Za-z0-9])(C\d|H)-\d\d(?!\d)")  # 한글이 바로 붙어도 잡는다
 META_KEYS = {"motivated_by"}
-
-# 홀드아웃 tests_knowledge(순서대로) → 그 지식을 해결하는 ontology 항목
-HOLDOUT_COVERAGE = {
-    "H-01": [["etp", "R-product-group"], ["asset_class"]],
-    "H-02": [["Fund", "R-fund-unit-representative"], ["on_sale", "R-sale-fund"], ["fund_type"]],
-    "H-03": [["DomesticListedProduct.cu_charge_rt", "R-zero-missing"], ["R-text-numeric"], ["R-null-exclude"]],
-    "H-04": [["issuer", "R-name-resolve"], ["bond_item", "R-bond-unit-item"]],
-    "H-05": [["product_name"], ["net_assets"]],
-    "H-06": [["net_assets", "R-zero-missing"], ["R-topn-nulls"], ["investment_region", "asset_class"]],
-    "H-07": [["R-credit-grade-order"], ["R-bond-unit-item"], ["R-scope-default"]],
-    "H-08": [["risk_grade", "R-risk-grade-order"], ["R-risk-grade-order"]],
-    "H-09": [["mmf"], ["R-sale-fund"], ["R-null-exclude"]],
-    "H-10": [["R-sale-bond"], ["R-bond-unit-item"]],
-    "H-11": [["R-zero-is-value"], ["etn", "R-product-group"]],
-    "H-12": [["R-sale-domestic-listed"], ["etf_holds", "R-holding-etf-count"], ["R-name-exact"]],
-    "H-13": [["R-as-of-date", "R-period-window"], ["R-bond-unit-item"]],
-    "H-14": [["etf_holds", "holding"]],
-}
 
 
 # ───────────────────────── 참조 해석 ─────────────────────────
@@ -321,11 +300,6 @@ def test_golden_proper_nouns_only_in_examples(src, item_id, item):
 
 
 @pytest.mark.parametrize("src,item_id,item", ITEMS, ids=lambda x: x if isinstance(x, str) else "")
-def test_no_holdout_proper_nouns(src, item_id, item):
-    assert not proper_noun_leaks(item, HOLDOUT_PROPER_NOUNS)
-
-
-@pytest.mark.parametrize("src,item_id,item", ITEMS, ids=lambda x: x if isinstance(x, str) else "")
 def test_no_gold_sql_copy(src, item_id, item):
     assert not gold_sql_overlap(item)
 
@@ -352,14 +326,6 @@ def test_motivated_by(src, item_id, item):
 def test_every_golden_question_covered():
     covered = {i for _, _, item in ITEMS for i in item["motivated_by"]}
     assert GOLDEN_IDS <= covered, sorted(GOLDEN_IDS - covered)
-
-
-@pytest.mark.parametrize("q", HOLDOUT, ids=lambda q: q["id"])
-def test_holdout_knowledge_resolved(q):
-    mapping = HOLDOUT_COVERAGE[q["id"]]
-    assert len(mapping) == len(q["tests_knowledge"])
-    for refs in mapping:
-        assert refs and all(any_ref_ok(r) for r in refs), refs
 
 
 def test_worksheet_refs_resolve():

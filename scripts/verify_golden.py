@@ -1,12 +1,11 @@
 """골든 데이터셋 정답 SQL을 실행·검사하고 정답 스냅샷과 검토표를 만든다.
 
 uv run python scripts/verify_golden.py [--version v2]
-uv run python scripts/verify_golden.py --questions golden/holdout_v1.yaml --out golden/gold_results_holdout_v1.json
 
 출력:
 - golden/gold_results_{version}.json : 문항별 정답 결과 스냅샷, 선택지별 결과, 경고
 - golden/review_sheet.md             : 사용자 검토용 요약표 (--questions 없이 실행할 때만)
-- --questions/--out                  : 다른 문항 파일(예: 홀드아웃)의 정답 스냅샷을 지정한 경로에 쓴다
+- --questions/--out                  : 다른 문항 파일의 정답 스냅샷을 지정한 경로에 쓴다
 """
 
 import argparse

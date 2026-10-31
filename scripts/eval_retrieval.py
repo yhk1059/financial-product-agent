@@ -1,18 +1,16 @@
-"""온톨로지 C층 검색을 골든(또는 홀드아웃) 문항으로 채점한다 (에이전트·HCX 대화 호출 없음).
+"""온톨로지 C층 검색을 골든 문항으로 채점한다 (에이전트·HCX 대화 호출 없음).
 
-uv run python scripts/eval_retrieval.py [--set golden|holdout] [--label 이름] [--ks 5,10,15,20] [--detail-k 15]
+uv run python scripts/eval_retrieval.py [--label 이름] [--ks 5,10,15,20] [--detail-k 15]
 
-- 정답: 골든은 knowledge.item_motivation(골든 id → 항목), 홀드아웃은 tests/test_ontology.py의
-  HOLDOUT_COVERAGE. 둘 다 C층 용어·규칙만 남긴다. A·B층 항목은 항상 들어가므로 뺀다.
+- 정답: knowledge.item_motivation(골든 id → 항목). C층 용어·규칙만 남긴다. A·B층 항목은 항상 들어가므로 뺀다.
 - 방식: vector(pgvector 코사인), keyword(이름·같은 말 일치, 규칙은 적용 대상에서 물려받음), hybrid(RRF).
   순위에서도 A·B층 항목을 빼고 상위 k를 자른다 (렌더링 때 어차피 따로 들어가므로).
 - 질문 임베딩은 data/retrieval_cache/에 캐시한다(portfolio_agent.search, 에이전트와 같은 캐시).
   결과는 data/retrieval_runs/{label}.json.
-- 기본 방식·k는 retrieval.DEFAULT_METHOD/DEFAULT_K. 이 값은 골든으로만 정하고, 홀드아웃은 확인용으로만 쓴다.
+- 기본 방식·k는 retrieval.DEFAULT_METHOD/DEFAULT_K. 이 값은 골든으로만 정한다.
 """
 
 import argparse
-import importlib.util
 import json
 import time
 from datetime import datetime
@@ -27,7 +25,6 @@ from portfolio_agent.search import is_cached, load_index, question_vector, vecto
 
 QUESTIONS_PATHS = {
     "golden": PROJECT_ROOT / "golden" / "questions_v2.yaml",
-    "holdout": PROJECT_ROOT / "golden" / "holdout_v1.yaml",
 }
 RUNS_DIR = PROJECT_ROOT / "data" / "retrieval_runs"
 METHODS = ("vector", "keyword", "hybrid")
@@ -43,16 +40,6 @@ def load_gold(candidates: set[str]) -> dict[str, set[str]]:
             if item in candidates:
                 gold.setdefault(qid, set()).add(item)
     return gold
-
-
-def load_holdout_gold(candidates: set[str]) -> dict[str, set[str]]:
-    """홀드아웃 문항별 정답: HOLDOUT_COVERAGE의 지식 줄마다 해결 항목을 모아 C층만 남긴다."""
-    path = PROJECT_ROOT / "tests" / "test_ontology.py"
-    spec = importlib.util.spec_from_file_location("test_ontology", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return {qid: {i for refs in lines for i in refs if i in candidates}
-            for qid, lines in module.HOLDOUT_COVERAGE.items()}
 
 
 def question_vectors(questions: list[dict]) -> dict[str, list[float]]:
@@ -80,7 +67,7 @@ def main():
     questions = yaml.safe_load(QUESTIONS_PATHS[args.qset].read_text(encoding="utf-8"))
     term_forms, rule_targets, target_forms, embedded = load_index()
     candidates = embedded - FIXED_ITEMS
-    gold = load_gold(candidates) if args.qset == "golden" else load_holdout_gold(candidates)
+    gold = load_gold(candidates)
     vectors = question_vectors(questions)
 
     results = []
