@@ -51,7 +51,7 @@ def test_ab_does_not_search(calls):
     assert calls["search"] == []
     assert calls["build"] == [(["prbd01n001"], [])]
     assert out == {"knowledge_rules": "규칙", "knowledge_tables": "테이블",
-                   "knowledge_layers": {"C": [], "expanded": []}}
+                   "knowledge_layers": {"C": [], "expanded": []}, "knowledge_oos": ""}
 
 
 def test_abc_searches_last_question(calls):
@@ -100,7 +100,7 @@ def test_failure_returns_empty(calls, monkeypatch):
 
     monkeypatch.setattr(graph, "get_knowledge", boom)
     assert graph.retrieve_knowledge(STATE, "abc") == {
-        "knowledge_rules": "", "knowledge_tables": "", "knowledge_layers": {}}
+        "knowledge_rules": "", "knowledge_tables": "", "knowledge_layers": {}, "knowledge_oos": ""}
 
 
 class FakeLLM:
@@ -160,7 +160,7 @@ def test_query_step_makes_tool_call(fake_llm):
     call = msg.tool_calls[0]
     assert call["name"] == "run_query" and call["args"]["query"] == "SELECT 1" and call["id"]
     assert msg.id
-    assert graph.route_after_generate({"messages": [msg]}) == "count_attempt"
+    assert graph.route_after_generate({"messages": [msg]}) == "run_query"
 
 
 def test_answer_step_ends(fake_llm):
@@ -340,8 +340,8 @@ def test_resolve_slots_empty_or_failure(monkeypatch):
 def test_resolve_slots_renders(monkeypatch):
     seen = {}
 
-    def fake_resolve(slots, kn, catalog, lookup, tables, dialogue):
-        seen.update(tables=tables, dialogue=dialogue)
+    def fake_resolve(slots, kn, catalog, lookup, tables, dialogue, question=""):
+        seen.update(tables=tables, dialogue=dialogue, question=question)
         return [{"slot": "value", "status": "confirmed", "text": "MMF", "fragment": "t.c IN ('a', 'b')"},
                 {"slot": "value", "status": "skipped", "text": "x", "fragment": ""}]
 
@@ -350,7 +350,7 @@ def test_resolve_slots_renders(monkeypatch):
     monkeypatch.setattr(graph, "resolve", fake_resolve)
     out = graph.resolve_slots({**BASE, "slots": {"values": ["MMF"]}}, lookup=object())
     assert out["resolved_text"] == "- 범주 'MMF' → t.c IN ('a', 'b')"
-    assert seen == {"tables": ["prbd01n001"], "dialogue": "사용자: q"}
+    assert seen == {"tables": ["prbd01n001"], "dialogue": "사용자: q", "question": "q"}
 
 
 def test_generate_query_uses_resolved(fake_llm):
@@ -407,13 +407,38 @@ def test_slot_graph_end_to_end(monkeypatch):
         return {"resolved": resolved, "resolved_text": "- x"}
 
     monkeypatch.setattr(graph, "resolve_slots", resolve_slots)
-    monkeypatch.setattr(graph, "_enforce_tool", lambda slot_checks=False: tools.make_run_query(
-        {}, slot_checks=slot_checks))
+    monkeypatch.setattr(graph, "_enforce_tool", lambda: tools.make_run_query({}, slot_checks=True))
     monkeypatch.setattr(tools.db, "fetch", lambda sql: (["n"], [(1,)]))
     agent = graph.build_graph(enforce=True, slots=True)
     final = agent.invoke({"messages": [HumanMessage("q")]})
     results = [m.text for m in final["messages"] if isinstance(m, ToolMessage)]
-    assert [r.startswith("Error:") for r in results] == [True, True, False]
+    assert [r.startswith("Error: [규칙]") for r in results] == [True, True, False]
     assert "crd_grd IN ('AAA', 'AA+')" in results[0] and results[2].endswith("이 조각을 그대로 쓰세요.)")
     assert llm.schemas.count("QuestionSlots") == 1
     assert final["messages"][-1].text == "끝"
+    assert final["attempts"] == 1  # 규칙 차단 2회는 실행 횟수에 들어가지 않는다
+
+
+def _tool_msgs(texts):
+    return [ToolMessage(t, tool_call_id=str(i)) for i, t in enumerate(texts)]
+
+
+def test_count_attempts_skips_rule_blocks_up_to_limit():
+    """규칙 차단은 FREE_RULE_BLOCKS까지 공짜, 그 뒤로는 실행 횟수에 더한다. 이전 턴은 세지 않는다."""
+    rule, db_err, ok = "Error: [규칙] 등급", "Error: syntax error", "n\n1\n(1행)"
+    prev = [HumanMessage("이전"), *_tool_msgs([db_err, db_err]), AIMessage("답")]
+    msgs = prev + [HumanMessage("q")]
+    assert graph.count_attempts(msgs) == 0
+    assert graph.count_attempts(msgs + _tool_msgs([rule, rule, rule, ok])) == 1
+    assert graph.count_attempts(msgs + _tool_msgs([rule] * 5 + [db_err])) == 3
+    assert graph.count_attempts(msgs + _tool_msgs([db_err, db_err, ok])) == 3
+
+
+def test_generate_query_appends_oos_section(fake_llm):
+    fake_llm.outputs = [_step("answer", answer="답")] * 2
+    graph.generate_query(BASE)
+    graph.generate_query({**BASE, "knowledge_oos": "- 편입 비중: 없음"})
+    seen = [c[0].content for c in fake_llm.calls]
+    assert "이 데이터에 없는 정보" not in seen[0]
+    assert seen[1].endswith("## 이 데이터에 없는 정보\n" + graph.generate_prompt.__globals__["OOS_SECTION"].split("\n", 1)[1]
+                            .replace("{oos}", "- 편입 비중: 없음"))

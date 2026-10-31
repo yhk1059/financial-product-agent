@@ -1,7 +1,7 @@
 """LangGraph SQL 에이전트 그래프.
 
 START → select_tables → [retrieve_knowledge] → [analyze_question → resolve_slots] → generate_query ─┬─(도구 호출 없음)→ END
-                                                                                  ↑          └─(도구 호출)→ count_attempt → run_query ─┘
+                                                                                  ↑          └─(도구 호출)→ run_query → count_attempt ─┘
 
 analyze_question → resolve_slots(--slots, 기본 끔; docs/plan_query_slots_design.md)는
 LLM이 질문의 이름·등급 조건·범주 값을 원문 그대로 칸(slots.QuestionSlots)에 넣고, 코드(slots.resolve)가 온톨로지·카탈로그·
@@ -49,7 +49,8 @@ from .schema_catalog import load_catalog, schema_card, table_overview
 from .slots import QuestionSlots, name_notes, render_resolved, resolve
 from . import db
 from .search import search
-from .sql_rules import applied_conditions, name_columns, ordered_columns, rewrite, zero_missing_columns
+from .sql_rules import (RULE_MARK, applied_conditions, cash_values, class_id_columns, name_columns, ordered_columns,
+                        rewrite, unit_config, zero_missing_columns, zero_value_columns)
 from .tools import make_run_query, run_query
 
 log = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ class AgentState(MessagesState):
     knowledge_rules: str   # 온톨로지 조립 규칙 ({rules} 자리). 비면 domain_rules.md 규칙을 쓴다
     knowledge_tables: str  # 스키마 카드 뒤에 붙이는 A층 블록
     knowledge_layers: dict  # 층별 항목 id (보고용)
+    knowledge_oos: str      # C층의 '데이터에 없는 개념' 줄. 비면 프롬프트에 그 절이 없다
     oracle_ids: list[str]   # oracle 모드에서 C층으로 쓸 항목 id (평가 스크립트가 입력으로 넣음)
     slots: dict             # analyze_question 원출력 (QuestionSlots.model_dump()). 실패면 {}
     resolved: list[dict]    # slots.resolve 결과. enforce 칸 검사가 읽는다
@@ -141,8 +143,9 @@ def retrieve_knowledge(state: AgentState, mode: str) -> dict:
         ctx = build_context(get_knowledge(), state.get("selected_tables") or [], c_ids)
     except Exception:
         log.exception("knowledge retrieval failed; continuing without ontology")
-        return {"knowledge_rules": "", "knowledge_tables": "", "knowledge_layers": {}}
-    return {"knowledge_rules": ctx.rules_text, "knowledge_tables": ctx.tables_text, "knowledge_layers": ctx.layers}
+        return {"knowledge_rules": "", "knowledge_tables": "", "knowledge_layers": {}, "knowledge_oos": ""}
+    return {"knowledge_rules": ctx.rules_text, "knowledge_tables": ctx.tables_text, "knowledge_layers": ctx.layers,
+            "knowledge_oos": ctx.oos_text}
 
 
 def _with_knowledge(state: AgentState, card: str) -> str:
@@ -168,7 +171,8 @@ def resolve_slots(state: AgentState, lookup=None) -> dict:
         return {"resolved": [], "resolved_text": ""}
     try:
         resolved = resolve(slots, get_knowledge(), load_catalog(), lookup or db.DbLookup(),
-                           state.get("selected_tables") or [], _recent_dialogue(state["messages"]))
+                           state.get("selected_tables") or [], _recent_dialogue(state["messages"]),
+                           question=_last_question(state["messages"]))
     except Exception:
         log.exception("slot resolution failed; continuing without slots")
         return {"resolved": [], "resolved_text": ""}
@@ -231,12 +235,21 @@ def _turn_sqls(messages: list[AnyMessage]) -> list[str]:
             for call in m.tool_calls if call["id"] in ok]
 
 
-def generate_query(state: AgentState, enforce: bool = False) -> dict:
+def _zero_missing() -> frozenset:
+    try:
+        return zero_missing_columns(get_knowledge())
+    except Exception:
+        log.exception("knowledge unavailable; rewrite skips zero exclusion")
+        return frozenset()
+
+
+def generate_query(state: AgentState, enforce: bool = False, zero_missing: frozenset = frozenset()) -> dict:
     tables = state.get("selected_tables") or []
     schema = _with_knowledge(state, schema_card(tables)) if tables else "(이 질문에는 테이블 조회가 필요하지 않습니다.)"
     give_up = state.get("attempts", 0) >= settings.max_query_attempts
     rules = state.get("knowledge_rules") or None
-    prompt = generate_prompt(tables, schema, give_up, rules=rules, resolved=state.get("resolved_text") or "")
+    prompt = generate_prompt(tables, schema, give_up, rules=rules, resolved=state.get("resolved_text") or "",
+                             oos=state.get("knowledge_oos") or "")
     messages = [SystemMessage(prompt), *_llm_history(state["messages"])]
     step, error = _structured_step(FinalAnswer if give_up else QueryStep, messages)
     if step is None:
@@ -251,25 +264,37 @@ def generate_query(state: AgentState, enforce: bool = False) -> dict:
         return {"messages": [AIMessage(answer)]}
     # 실행은 LLM이 아니라 코드가 정한다: run_query 도구 호출을 직접 만들어 이후 노드(실행)로 넘긴다.
     msg_id = str(uuid.uuid4())
-    sql = rewrite(step.sql.strip()) if enforce else step.sql.strip()
+    sql = rewrite(step.sql.strip(), zero_missing) if enforce else step.sql.strip()
     call = {"name": "run_query", "args": {"query": sql}, "id": f"call_{msg_id}"}
     return {"messages": [AIMessage(content="", tool_calls=[call], id=msg_id)]}
 
 
-def route_after_generate(state: AgentState) -> Literal["count_attempt", "__end__"]:
+def route_after_generate(state: AgentState) -> Literal["run_query", "__end__"]:
     last = state["messages"][-1]
-    return "count_attempt" if isinstance(last, AIMessage) and last.tool_calls else END
+    return "run_query" if isinstance(last, AIMessage) and last.tool_calls else END
 
 
-def _enforce_tool(slot_checks: bool = False):
-    """enforce용 run_query. knowledge를 못 읽으면 knowledge가 필요한 검사(등급·0=미입력·이름) 없이 계속한다."""
+FREE_RULE_BLOCKS = 3  # 실행 전 규칙 차단은 턴마다 이만큼까지 실행 횟수에 넣지 않는다(그 뒤로는 센다: 무한 반복 방지)
+
+
+def count_attempts(messages: list[AnyMessage]) -> int:
+    """이번 턴의 실행 횟수: 실행한(또는 DB 오류가 난) 쿼리 수 + FREE_RULE_BLOCKS를 넘긴 규칙 차단 수."""
+    start = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1) + 1
+    results = [m.text for m in messages[start:] if isinstance(m, ToolMessage)]
+    blocked = sum(t.startswith(f"Error: {RULE_MARK}") for t in results)
+    return len(results) - blocked + max(0, blocked - FREE_RULE_BLOCKS)
+
+
+def _enforce_tool():
+    """enforce용 run_query. knowledge를 못 읽으면 knowledge가 필요한 검사(등급·0=미입력·이름·단위·현금성) 없이 계속한다."""
     try:
         kn = get_knowledge()
         return make_run_query(ordered_columns(kn), zero_missing_columns(kn), name_columns(kn), db.lookup_values,
-                              slot_checks=slot_checks)
+                              slot_checks=True, units=unit_config(kn), class_ids=class_id_columns(kn), cash=cash_values(kn),
+                              zero_value=zero_value_columns(kn))
     except Exception:
-        log.exception("knowledge unavailable; skipping grade, zero and name checks")
-        return make_run_query({}, slot_checks=slot_checks)
+        log.exception("knowledge unavailable; skipping grade, zero, name, unit and cash checks")
+        return make_run_query({}, slot_checks=True)
 
 
 def build_graph(checkpointer=None, ontology: str = "off", enforce: bool = False, slots: bool = False):
@@ -279,8 +304,9 @@ def build_graph(checkpointer=None, ontology: str = "off", enforce: bool = False,
     builder.add_node(select_tables)
     if enforce:
         # 노드 이름은 generate_query로 둔다: cli.ask가 이 이름에서 답변을 모은다.
-        builder.add_node("generate_query", lambda s: generate_query(s, enforce=True))
-        builder.add_node("run_query", ToolNode([_enforce_tool(slot_checks=slots)], name="run_query"))
+        zero_missing = _zero_missing()
+        builder.add_node("generate_query", lambda s: generate_query(s, enforce=True, zero_missing=zero_missing))
+        builder.add_node("run_query", ToolNode([_enforce_tool()], name="run_query"))
     else:
         builder.add_node(generate_query)
         builder.add_node("run_query", ToolNode([run_query], name="run_query"))
@@ -297,10 +323,11 @@ def build_graph(checkpointer=None, ontology: str = "off", enforce: bool = False,
         builder.add_edge("analyze_question", "resolve_slots")
         prev = "resolve_slots"
     builder.add_edge(prev, "generate_query")
-    builder.add_node("count_attempt", lambda s: {"attempts": s.get("attempts", 0) + 1})
+    # 실행 횟수는 실행 뒤에 센다: 코드가 실행 전에 막은 규칙 오류는 FREE_RULE_BLOCKS까지 한도에서 뺀다.
+    builder.add_node("count_attempt", lambda s: {"attempts": count_attempts(s["messages"])})
     builder.add_conditional_edges("generate_query", route_after_generate)
-    builder.add_edge("count_attempt", "run_query")
-    builder.add_edge("run_query", "generate_query")
+    builder.add_edge("run_query", "count_attempt")
+    builder.add_edge("count_attempt", "generate_query")
     return builder.compile(checkpointer=checkpointer)
 
 

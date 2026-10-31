@@ -76,14 +76,14 @@ def fake_lookup(table, column, text, mode):
 def test_zero_missing_is_error_without_fetch(fetched):
     zero = frozenset({("pref01n001", "cu_charge_rt")})
     out = make_run_query({}, zero).invoke({"query": "SELECT AVG(cu_charge_rt::numeric) FROM pref01n001"})
-    assert out.startswith("Error: ") and "cu_charge_rt::numeric > 0" in out
+    assert out.startswith("Error: [규칙] ") and "NULLIF(cu_charge_rt, '')::numeric > 0" in out
     assert fetched["calls"] == []
 
 
 def test_unknown_name_with_candidates_is_error(fetched):
     tool = make_run_query({}, names=NAMES, name_lookup=fake_lookup)
     out = tool.invoke({"query": "SELECT COUNT(*) FROM prbd01n001 WHERE pd_pbcm = '가나다'"})
-    assert out.startswith("Error: 발행기관 이름 '가나다'는 prbd01n001.pd_pbcm에 정확히 일치하는 값이 없습니다")
+    assert out.startswith("Error: [규칙] 발행기관 이름 '가나다'는 prbd01n001.pd_pbcm에 정확히 일치하는 값이 없습니다")
     assert "'(주)가나다은행', '가나다캐피탈'" in out
     assert fetched["calls"] == []
 
@@ -112,3 +112,35 @@ def test_unknown_holding_runs_with_note(fetched):
 def test_name_check_off_by_default(fetched):
     out = make_run_query({}).invoke({"query": "SELECT COUNT(*) FROM prbd01n001 WHERE pd_pbcm = '가나다'"})
     assert out == "n\n0\n(1행)"
+
+
+# ───────────────────────── SQLSTATE별 고치는 법 ─────────────────────────
+
+@pytest.mark.parametrize("state, msg, word", [
+    ("42803", 'column "x" must appear in the GROUP BY clause', "GROUP BY"),
+    ("42883", "operator does not exist: text > integer", "::numeric"),
+    ("22007", 'invalid input syntax for type interval: "2026-08-21"', "INTERVAL '3 years'"),
+    ("42601", "syntax error at or near", "PostgreSQL"),
+])
+def test_sqlstate_hint(state, msg, word):
+    assert word in tools.sqlstate_hint(state, msg)
+
+
+def test_sqlstate_hint_unknown_is_empty():
+    assert tools.sqlstate_hint("XX000", "boom") == ""
+
+
+def test_setop_mismatch_hint():
+    assert "COUNT(*) FROM (" in tools.sqlstate_hint("42804", "INTERSECT types bigint and text cannot be matched")
+
+
+def test_repeated_failed_sql_gets_note(fetched):
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    bad = "SELECT 1 FROM nowhere"
+    msgs = [HumanMessage("q"), AIMessage("", tool_calls=[{"name": "run_query", "args": {"query": bad}, "id": "c1"}]),
+            ToolMessage("Error: 허용되지 않은 테이블입니다", tool_call_id="c1")]
+    tool = make_run_query({}, slot_checks=True)
+    out = tool.invoke({"query": bad, "state": {"messages": msgs}})
+    assert out.startswith("Error:") and out.endswith(tools.REPEAT_NOTE)
+    out = tool.invoke({"query": "SELECT 1 FROM prbd01n001", "state": {"messages": msgs}})
+    assert tools.REPEAT_NOTE not in out

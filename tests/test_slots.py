@@ -346,3 +346,73 @@ def test_no_proper_nouns_in_slot_code():
     for text in texts:
         assert not proper_noun_leaks({"text": text}, GOLDEN_PROPER_NOUNS)
         assert not QUESTION_ID.search(text), re.findall(QUESTION_ID, text)
+
+
+# ───────────────────────── 질문에서 코드가 찾는 범주 값 ─────────────────────────
+
+from portfolio_agent.slots import scan_values
+
+
+def _kn_values():
+    """용어 없음(순서 용어도 없음)."""
+    class K:
+        terms = {}
+    return K()
+
+
+CAT = {"tables": {"t": {"columns": [
+    {"name": "big", "values": {"해외주식형": 1, "주식형": 2, "채권형": 3}},
+    {"name": "sale", "values": {"판매중": 1, "판매완료": 2}},
+    {"name": "two", "values": {"국내": 1}},
+    {"name": "eng", "values": {"ETF": 1}},
+]}}}
+
+
+def test_scan_values_finds_long_korean_values_only():
+    out = scan_values("판매중인 국내 ETF 중 채권형", _kn_values(), CAT, ["t"])
+    assert sorted((r["column"], r["values"][0], r["status"]) for r in out) == [("big", "채권형", "confirmed"),
+                                                                                ("sale", "판매중", "confirmed")]
+
+
+def test_scan_values_skips_value_covered_by_longer_value():
+    out = scan_values("해외주식형 펀드", _kn_values(), CAT, ["t"])
+    assert [r["values"] for r in out] == [["해외주식형"]]
+    out = scan_values("국내주식형이랑 해외주식형", _kn_values(), CAT, ["t"])  # 앞의 주식형은 덮이지 않는다
+    assert sorted(v for r in out for v in r["values"]) == ["주식형", "해외주식형"]
+
+
+def test_scan_values_skips_ordered_columns():
+    class K:
+        terms = {"g": {"order_values": ["판매중", "판매완료"], "canonical": [("T.sale", None)]}}
+    assert scan_values("판매중인 것", K(), CAT, ["t"]) == []
+
+
+def test_value_slot_requires_its_column():
+    resolved = [{"slot": "value", "status": "confirmed", "text": "국고채", "table": "prbd01n001",
+                 "column": "std_pd_scls_nm", "values": ["국고채"], "fragment": "prbd01n001.std_pd_scls_nm = '국고채'"}]
+    out = slot_violations("SELECT AVG(x) FROM prbd01n001 WHERE std_pd_mcls_nm = '국공채'", resolved)
+    assert len(out) == 1 and "std_pd_scls_nm 컬럼을 쓰지 않았습니다" in out[0]
+    assert slot_violations("SELECT std_pd_scls_nm, AVG(x) FROM prbd01n001 GROUP BY 1", resolved) == []
+    out = slot_violations("SELECT AVG(x) FROM prbd01n001 WHERE std_pd_scls_nm = '국민주택'", resolved)
+    assert len(out) == 1 and "다른 값" in out[0]
+
+
+def test_candidates_prefer_column_of_confirmed_value():
+    from portfolio_agent.slots import prefer_confirmed_columns
+    cand = {"slot": "value", "status": "candidates", "text": "주식형", "table": "t", "column": "", "values": ["주식형", "주식형"],
+            "fragment": "a = '주식형', b = '주식형'", "note": "", "kind": "", "options": [["a", "주식형"], ["b", "주식형"]]}
+    conf = {"slot": "value", "status": "confirmed", "text": "해외주식형", "table": "t", "column": "b", "values": ["해외주식형"],
+            "fragment": "t.b = '해외주식형'", "note": "", "kind": ""}
+    out = prefer_confirmed_columns([cand, conf])
+    assert out[0]["status"] == "confirmed" and out[0]["column"] == "b" and out[0]["fragment"] == "t.b = '주식형'"
+    assert prefer_confirmed_columns([cand])[0]["status"] == "candidates"  # 확정 값이 없으면 그대로
+
+
+def test_value_in_one_union_branch_is_enough():
+    resolved = [{"slot": "value", "status": "confirmed", "text": "해외주식형", "table": "prfd01n001", "column": "zrin_btyp_nm",
+                 "values": ["해외주식형"], "fragment": "prfd01n001.zrin_btyp_nm = '해외주식형'"}]
+    sql = ("SELECT '국내' AS g, AVG(r) FROM prfd01n001 WHERE zrin_btyp_nm = '주식형' "
+           "UNION ALL SELECT '해외', AVG(r) FROM prfd01n001 WHERE zrin_btyp_nm = '해외주식형'")
+    assert slot_violations(sql, resolved) == []
+    out = slot_violations("SELECT AVG(r) FROM prfd01n001 WHERE zrin_btyp_nm = '주식형'", resolved)
+    assert len(out) == 1 and "다른 값" in out[0]

@@ -58,11 +58,15 @@ GENERATE_QUERY = """당신은 금융상품 데이터를 PostgreSQL로 조회해 
 - PostgreSQL 문법, 단일 SELECT 문만 사용합니다(INSERT/UPDATE/DELETE/DDL 금지).
 - 아래 스키마에 있는 테이블과 컬럼만 사용합니다. 컬럼명을 지어내지 않습니다.
 - 필요한 컬럼만 SELECT 하고, 사용자가 개수를 정하지 않으면 LIMIT {top_k} 이하로 조회합니다.
-- 별칭(AS)에 공백이 들어가면 큰따옴표로 감쌉니다(예: AS "1년 수익률").
+- 별칭(AS)은 영문·숫자·밑줄만 쓴 한 단어로 씁니다(예: AS return_1y). 한글이나 공백이 든 별칭은 쓰지 않습니다.
 - 질문에 나온 조건은 하나도 빠짐없이 WHERE에 넣습니다.
 - "몇 개"를 물으면 COUNT로 전체 개수를 구합니다. 묻지 않은 GROUP BY 분해는 하지 않습니다.
 - 상품 목록을 보여줄 때는 상품명과 상품번호(코드)를 함께 조회합니다.
-- 집계 질문은 GROUP BY / COUNT / AVG 등으로 DB에서 계산합니다. 직접 세거나 계산하지 않습니다.
+- 집계 질문은 GROUP BY / COUNT / AVG 등으로 DB에서 계산합니다. 직접 세거나 계산하지 않습니다. 비율도 한 행으로 계산합니다.
+- 날짜 상수는 DATE '{as_of}' 꼴로 쓰고 기간은 INTERVAL '3 years'를 더합니다.
+
+## SQL 예시
+{examples}
 
 ## 답변 규칙
 - 반드시 [실행 결과]에 있는 값만 근거로 답합니다. 결과에 없는 수치를 지어내지 않습니다.
@@ -98,6 +102,37 @@ ANALYZE_QUESTION = """당신은 금융상품 질문에서 특정한 말을 원�
 
 RESOLVED_SECTION = "## 확인된 값\n코드가 데이터와 용어 사전으로 확인한 값입니다. 해당 조건은 이 조각을 그대로 씁니다.\n{resolved}"
 
+OOS_SECTION = ("## 이 데이터에 없는 정보\n아래 정보는 어느 테이블에도 없습니다. 질문이 이 정보를 요구하면 조회하지 말고 "
+               "action=\"answer\"로 어떤 정보가 데이터에 없어서 답할 수 없는지 밝히세요. 기억이나 추측, 다른 컬럼의 계산으로 "
+               "대신하지 않습니다. 답변 첫 문장에 아래 항목 이름을 그대로 써서 '○○ 정보가 데이터에 없다'고 밝히고, "
+               "데이터에 있는 것(예: 편입 여부)만 안내할 수 있습니다.\n{oos}")
+
+# 자주 틀리는 SQL 꼴의 일반 예시. 선택된 테이블(과 공통)의 것만 프롬프트에 들어간다. 산문 규칙은 자주 무시되므로 꼴로 보여 준다.
+SQL_EXAMPLES = {
+    "공통": """- 비율(%): 분모는 값이 있는 행만 센다(COUNT(컬럼)은 NULL을 빼고 센다).
+  SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE 조건) / COUNT(기준컬럼), 1) AS 비율 FROM 테이블 WHERE …
+- 같은 테이블의 두 그룹 비교: 그룹 컬럼의 저장된 값으로 거르고 그 컬럼으로 묶는다(값을 바꿔 적지 않는다).
+  SELECT 그룹컬럼, AVG(컬럼) AS avg_value, COUNT(컬럼) AS n FROM 테이블 WHERE 그룹컬럼 IN ('값1', '값2') AND … GROUP BY 그룹컬럼
+- 두 테이블 비교: 테이블마다 한 행, 묻지 않은 GROUP BY는 넣지 않는다.
+  SELECT 'A' AS market, AVG(컬럼) AS avg_value, COUNT(컬럼) AS n FROM 테이블A WHERE …
+  UNION ALL SELECT 'B', AVG(컬럼), COUNT(컬럼) FROM 테이블B WHERE …""",
+    "prbd01n001": """- 채권 종목 단위 집계: 같은 종목이 여러 행이므로 먼저 종목으로 중복을 없앤다.
+  SELECT AVG(컬럼) FROM (SELECT DISTINCT pd_no, 컬럼 FROM prbd01n001 WHERE …) t""",
+    "domestic_etf_holdings": """- 여러 종목을 모두 담은 ETF: IN은 '하나라도'이므로 HAVING으로 종목 수를 맞춘다.
+  SELECT item_id FROM domestic_etf_holdings WHERE component_name IN ('종목1', '종목2') GROUP BY item_id
+  HAVING COUNT(DISTINCT component_name) = 2
+- 두 ETF의 구성종목 차이: 각 ETF의 종목 집합을 만들고 NOT IN으로 뺀다.
+  WITH a AS (SELECT DISTINCT component_name AS n FROM domestic_etf_holdings WHERE item_id = 'ID1'),
+       b AS (SELECT DISTINCT component_name AS n FROM domestic_etf_holdings WHERE item_id = 'ID2')
+  SELECT 'ID1에만' AS 구분, n FROM a WHERE n NOT IN (SELECT n FROM b)
+  UNION ALL SELECT 'ID2에만', n FROM b WHERE n NOT IN (SELECT n FROM a)""",
+}
+
+
+def examples_for(tables: list[str]) -> str:
+    """공통 예시 + 선택된 테이블의 예시."""
+    return "\n".join(SQL_EXAMPLES[k] for k in ["공통", *tables] if k in SQL_EXAMPLES)
+
 GIVE_UP = (
     "쿼리 실행 횟수 한도({n}회)에 도달했습니다. 더 이상 SQL을 만들지 말고 answer만 채우세요. "
     "지금까지의 결과로 답할 수 있는 만큼 답하고 답하지 못한 부분과 이유를 설명하세요."
@@ -105,15 +140,18 @@ GIVE_UP = (
 
 
 def generate_prompt(tables: list[str], schema: str, give_up: bool = False, rules: str | None = None,
-                    resolved: str = "") -> str:
+                    resolved: str = "", oos: str = "") -> str:
     """rules가 None이면 domain_rules.md의 규칙(rules_for), 아니면 그 글(온톨로지 조립 규칙)을 넣는다.
 
-    resolved(resolve_slots의 확인된 값)가 비면 그것 없는 프롬프트와 글자까지 같다.
+    resolved(resolve_slots의 확인된 값)·oos(데이터에 없는 개념 줄)가 비면 그것 없는 프롬프트와 글자까지 같다.
     """
     rules = rules_for(tables) if rules is None else rules
-    prompt = GENERATE_QUERY.format(top_k=settings.max_result_rows, rules=rules, schema=schema)
+    prompt = GENERATE_QUERY.format(top_k=settings.max_result_rows, rules=rules, schema=schema,
+                                   as_of=settings.as_of_date, examples=examples_for(tables))
     if resolved:
         prompt += "\n\n" + RESOLVED_SECTION.format(resolved=resolved)
+    if oos:
+        prompt += "\n\n" + OOS_SECTION.format(oos=oos)
     if give_up:
         prompt += "\n\n## 주의\n" + GIVE_UP.format(n=settings.max_query_attempts)
     return prompt

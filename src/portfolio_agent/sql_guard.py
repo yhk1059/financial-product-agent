@@ -32,8 +32,8 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # 문제 토큰 바로 앞이 'AS 단어 '이면 공백이 든 별칭이다 (AS 개인 세후수익률, 가드가 고친 AS "1년" 수익률).
 _ALIAS_BEFORE = re.compile(r'\bAS\s+("[^"]*"|[^\s,()"\']+)\s+$', re.IGNORECASE)
 ALIAS_SPACE_HINT = (
-    '별칭에 공백이 있으면 큰따옴표로 감싸세요(예: AS "개인 세후수익률"). '
-    "ORDER BY 등에서 그 별칭을 다시 쓸 때도 같은 따옴표를 씁니다."
+    "별칭(AS)은 영문·숫자·밑줄만 쓴 한 단어로 바꾸세요(예: AS after_tax_yield). "
+    "ORDER BY 등에서 그 별칭을 다시 쓸 때도 같은 이름을 씁니다."
 )
 
 

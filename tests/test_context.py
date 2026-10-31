@@ -155,3 +155,16 @@ def test_no_trace_metadata():
     text = ctx.rules_text + ctx.tables_text
     for banned in ("motivated_by", "P-", "profiling:", "혼동"):
         assert banned not in text
+
+
+def test_oos_text_lists_in_data_false_terms_for_selected_tables():
+    """C층의 '데이터에 없는 개념'은 oos_text로 따로 나온다. scope_tables가 있으면 선택된 테이블과 겹칠 때만."""
+    k = kn()
+    k.items["weight"] = _item("term", "편입 비중", "구성종목의 비율이다.")
+    k.terms["weight"] = {"scope_tables": ["tbl_hold"], "in_data": False, "order_values": None, "forms": ["비중"],
+                         "canonical": []}
+    ctx = build_context(k, ["tbl_listed"], ["future", "weight"])
+    assert ctx.oos_text == "- 미래 수익률: 앞으로의 수익률이다."  # 편입 비중은 구성종목 테이블이 없으면 빠진다
+    ctx = build_context(k, ["tbl_hold"], ["weight"])
+    assert ctx.oos_text == "- 편입 비중 [같은 말: 비중]: 구성종목의 비율이다."
+    assert build_context(k, ["tbl_listed"], ["on_sale"]).oos_text == ""

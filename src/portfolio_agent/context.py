@@ -31,6 +31,7 @@ class Context:
     rules_text: str   # 프롬프트 {rules} 자리
     tables_text: str  # 스키마 카드 뒤에 붙이는 A층 블록
     layers: dict[str, list[str]] = field(default_factory=dict)  # A·B·C·expanded 항목 id (보고용)
+    oos_text: str = ""  # C층에 든 '데이터에 없는 개념'(in_data false) 줄. 프롬프트 끝 '## 이 데이터에 없는 정보'에 들어간다
 
 
 def _rows(cur, sql: str) -> list[dict]:
@@ -282,4 +283,22 @@ def build_context(kn: Knowledge, tables: list[str], c_ids: list[str]) -> Context
         rules_text=render_rules(kn, tables, b_ids, c_ids + added),
         tables_text=render_tables(kn, tables),
         layers={"A": a_ids, "B": b_ids, "C": c_ids, "expanded": added, "dropped": dropped},
+        oos_text=render_oos(kn, c_ids + added, tables),
     )
+
+
+def render_oos(kn: Knowledge, ids: list[str], tables: list[str]) -> str:
+    """ids 중 데이터에 없는 개념(in_data false)인 용어를 '- 라벨 [같은 말: …]: 정의' 줄로. 없으면 빈 문자열.
+
+    용어에 scope_tables가 있으면 선택된 테이블과 겹칠 때만 넣는다(편입 비중은 구성종목 테이블 질문에서만.
+    ETN '레버리지 비중' 같은 다른 뜻의 비중 질문에 거절을 유도하지 않게).
+    """
+    lines = []
+    for i in ids:
+        t = kn.terms.get(i)
+        if t is None or t["in_data"] or (t["scope_tables"] and not set(t["scope_tables"]) & set(tables)):
+            continue
+        item = kn.items[i]
+        forms = [f for f in t["forms"] if f not in label_forms(item["label"])]
+        lines.append(f"- {item['label']}" + (f" [같은 말: {', '.join(forms)}]" if forms else "") + f": {item['definition']}")
+    return "\n".join(lines)

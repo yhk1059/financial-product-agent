@@ -37,7 +37,8 @@ def test_rules_none_keeps_current_prompt():
     """rules를 주지 않으면 domain_rules.md 규칙(rules_for)을 쓰는 기존 프롬프트와 글자까지 같다."""
     tables, schema = ["prbd01n001"], "(스키마)"
     expected = prompts.GENERATE_QUERY.format(
-        top_k=prompts.settings.max_result_rows, rules=prompts.rules_for(tables), schema=schema)
+        top_k=prompts.settings.max_result_rows, rules=prompts.rules_for(tables), schema=schema,
+        as_of=prompts.settings.as_of_date, examples=prompts.examples_for(tables))
     assert prompts.generate_prompt(tables, schema) == expected
     assert prompts.generate_prompt(tables, schema, rules=None) == expected
 
@@ -58,3 +59,19 @@ def test_generate_prompt_describes_structured_output():
 def test_give_up_prompt_has_no_tool_call():
     prompt = prompts.generate_prompt(["prbd01n001"], "(스키마)", give_up=True)
     assert "answer만 채우세요" in prompt and "도구" not in prompt
+
+
+def test_examples_follow_selected_tables():
+    """SQL 예시는 공통 + 선택된 테이블의 것만 들어간다."""
+    bond = prompts.generate_prompt(["prbd01n001"], "(스키마)")
+    assert "## SQL 예시" in bond and "DISTINCT pd_no" in bond and "HAVING COUNT(DISTINCT component_name)" not in bond
+    holdings = prompts.generate_prompt(["domestic_etf_holdings", "pref01n001"], "(스키마)")
+    assert "HAVING COUNT(DISTINCT component_name)" in holdings and "DISTINCT pd_no" not in holdings
+    assert "UNION ALL" in bond and "UNION ALL" in holdings  # 공통 예시
+
+
+def test_oos_section_only_when_given():
+    base = prompts.generate_prompt(["pref01n001"], "(스키마)")
+    with_oos = prompts.generate_prompt(["pref01n001"], "(스키마)", oos="- 편입 비중: 없음")
+    assert "이 데이터에 없는 정보" not in base
+    assert with_oos.startswith(base) and with_oos.endswith("- 편입 비중: 없음")

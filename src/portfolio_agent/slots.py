@@ -24,6 +24,8 @@ MAX_IDS = 10          # 식별값 목록 상한
 MAX_STRIKES = 2       # 칸 검사로 이만큼 막았으면 그 뒤로는 막지 않고 알림만 붙인다
 SLOT_ERROR_MARK = "이 조각을 그대로 쓰세요"  # 칸 검사 오류 글에 들어가는 말 (막은 횟수를 셀 때 쓴다)
 STATUS_SHOWN = ("confirmed", "candidates", "not_found")
+MIN_SCAN_LEN = 3      # 질문에서 코드가 직접 찾는 범주 값의 최소 길이(국내·해외·주식 같은 두 글자는 뜻이 넓어 보지 않는다)
+_HANGUL = re.compile(r"[가-힣]")
 _CORP = re.compile(r"\(주\)|\(유\)|㈜|주식회사")
 _GRADE_NO = re.compile(r"\((\d+)등급\)")
 
@@ -207,8 +209,11 @@ def _catalog_column(catalog: dict, table: str, column: str) -> dict | None:
     return next((c for c in catalog["tables"].get(table, {}).get("columns", []) if c["name"] == column), None)
 
 
-def resolve_value(kn, catalog: dict, tables: list[str], text: str) -> list[dict]:
-    """범주 값: 1) 값 묶음 용어(bundle)의 표현이면 canonical 값 전체, 2) 아니면 카탈로그 범주 값."""
+def resolve_value(kn, catalog: dict, tables: list[str], text: str, min_len: int = 2) -> list[dict]:
+    """범주 값: 1) 값 묶음 용어(bundle)의 표현이면 canonical 값 전체, 2) 아니면 카탈로그 범주 값.
+
+    min_len: 원문이 값을 포함하는 꼴(국고채권 → 국고채)로 받을 값의 최소 길이.
+    """
     t = squash(text)
     for tid, term in kn.terms.items():
         if not term.get("bundle") or t not in _forms(kn, tid):
@@ -221,7 +226,7 @@ def resolve_value(kn, catalog: dict, tables: list[str], text: str) -> list[dict]
     hits = _catalog_hits(catalog, tables, lambda v: squash(v) == t)
     if not hits:  # 원문이 값을 포함한다 (국고채권 → 국고채). 숫자·한 글자 값은 우연히 걸리므로 보지 않는다
         hits = _catalog_hits(catalog, tables,
-                             lambda v: len(squash(v)) >= 2 and not squash(v).isdigit() and squash(v) in t)
+                             lambda v: len(squash(v)) >= min_len and not squash(v).isdigit() and squash(v) in t)
     if not hits:
         return [_item("value", text, "skipped", note="범주 값에서 찾지 못함")]
     out = []
@@ -232,7 +237,26 @@ def resolve_value(kn, catalog: dict, tables: list[str], text: str) -> list[dict]
             out.append(_item("value", text, "confirmed", table, column, [value], _in(table, column, [value])))
         else:
             shown = ", ".join(f"{c} = '{v}'" for _, c, v in mine)
-            out.append(_item("value", text, "candidates", table, "", [v for _, _, v in mine], shown))
+            item = _item("value", text, "candidates", table, "", [v for _, _, v in mine], shown)
+            item["options"] = [[c, v] for _, c, v in mine]  # (컬럼, 값) 후보. resolve가 같은 컬럼 우선으로 확정할 수 있다
+            out.append(item)
+    return out
+
+
+def prefer_confirmed_columns(resolved: list[dict]) -> list[dict]:
+    """여러 컬럼에 같은 값이 있어 candidates인 범주 값을, 같은 질문에서 이미 확정된 값의 컬럼이 그 후보에
+    하나만 있으면 그 컬럼으로 확정한다(국내주식형·해외주식형 → 둘 다 제로인 대유형)."""
+    confirmed = {(r["table"], r["column"]) for r in resolved if r["slot"] == "value" and r["status"] == "confirmed"}
+    out = []
+    for r in resolved:
+        opts = r.get("options") or []
+        if r["slot"] == "value" and r["status"] == "candidates" and opts:
+            mine = [(c, v) for c, v in opts if (r["table"], c) in confirmed]
+            if len({c for c, _ in mine}) == 1:
+                column, value = mine[0]
+                r = _item("value", r["text"], "confirmed", r["table"], column, [value], _in(r["table"], column, [value]),
+                          note=f"같은 질문의 확정 값과 같은 컬럼 {column}")
+        out.append(r)
     return out
 
 
@@ -293,16 +317,58 @@ def _confirmed_name(kn, tables, lookup, kind, text, table, column, concept, valu
     return _item("name", text, "confirmed", table, column, [value], fragment, note, kind=kind)
 
 
-def resolve(slots: dict, kn, catalog: dict, lookup: Lookup, tables: list[str], dialogue: str = "") -> list[dict]:
-    """칸 → Resolved 목록 (dropped·skipped 포함, 기록용). dialogue가 있으면 원문 검증을 먼저 한다."""
+def scan_values(question: str, kn, catalog: dict, tables: list[str]) -> list[dict]:
+    """질문에 그대로 적힌 범주 값(한글, MIN_SCAN_LEN자 이상)을 코드가 찾는다. LLM이 칸에 넣지 않아도 잡는다.
+
+    같은 자리의 더 긴 값에 완전히 덮이는 값(해외주식형 속의 주식형)과 순서 용어(등급) 컬럼의 값은 보지 않는다.
+    같은 값이 여러 컬럼에 있으면 resolve_value가 candidates로 둔다.
+    """
+    if not question:
+        return []
+    ordered = {ref.split(".", 1)[1] for tid, t in kn.terms.items() if t["order_values"]
+               for ref, _ in t["canonical"] if "." in ref}
+    hits = _catalog_hits(catalog, tables, lambda v: len(v) >= MIN_SCAN_LEN and _HANGUL.search(v) and v in question)
+    values = {v for _, c, v in hits if c not in ordered}
+    def spans(v):
+        return [(m.start(), m.end()) for m in re.finditer(re.escape(v), question)]
+
+    out = []
+    for v in sorted(values, key=len, reverse=True):
+        longer = [s for w in values if len(w) > len(v) and v in w for s in spans(w)]
+        if all(any(a >= la and b <= lb for la, lb in longer) for a, b in spans(v)):
+            continue  # 모든 자리가 더 긴 값 안에 있다
+        out += resolve_value(kn, catalog, tables, v)
+    return out
+
+
+def resolve(slots: dict, kn, catalog: dict, lookup: Lookup, tables: list[str], dialogue: str = "",
+            question: str = "") -> list[dict]:
+    """칸 → Resolved 목록 (dropped·skipped 포함, 기록용). dialogue가 있으면 원문 검증을 먼저 한다.
+
+    찾지 못한 이름은 범주 값으로 한 번 더 본다(이름 칸에 든 '국내주식형' 같은 분류 말).
+    question(마지막 질문)이 있으면 거기 그대로 적힌 범주 값도 코드가 찾아 더한다(scan_values).
+    """
     kept, out = validate_slots(slots, dialogue, kn) if dialogue else (slots, [])
     for n in kept.get("names", []):
-        out += resolve_name(kn, tables, lookup, n)
+        found = resolve_name(kn, tables, lookup, n)
+        if all(r["status"] in ("not_found", "skipped") for r in found):
+            # 분류 말을 이름 칸에 넣은 경우(국내주식형). 값이 원문 대부분을 덮을 때만(해외 채권형 ETF → ETF는 아니다)
+            as_value = [r for r in resolve_value(kn, catalog, tables, n["text"], max(MIN_SCAN_LEN, len(squash(n["text"])) - 2))
+                        if r["status"] != "skipped" and _HANGUL.search("".join(r["values"]))]
+            if as_value:
+                found = as_value
+        out += found
     for g in kept.get("grades", []):
         out += resolve_grade(kn, catalog, tables, g)
     for v in kept.get("values", []):
         out += resolve_value(kn, catalog, tables, v)
-    return out
+    seen = {(r["table"], r["column"], tuple(r["values"])) for r in out if r["slot"] == "value"}
+    for r in scan_values(question, kn, catalog, tables):
+        key = (r["table"], r["column"], tuple(r["values"]))
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return prefer_confirmed_columns(out)
 
 
 # ───────────────────────── 렌더링 ─────────────────────────
@@ -381,14 +447,24 @@ def slot_violations(sql: str, resolved: list[dict]) -> list[str]:
     except (sqlglot.errors.ParseError, sqlglot.errors.TokenError):
         return []
     tables = {t.name.lower() for t in tree.find_all(exp.Table)}
+    columns = {c.name for c in tree.find_all(exp.Column)}
     found = []
     for r in resolved:
         if r["status"] != "confirmed" or r["slot"] not in ("grade", "value") or r["table"] not in tables:
             continue
         want = set(r["values"])
-        for kind, got in _sql_sets(tree, r["column"]):
+        if r["slot"] == "value" and r["column"] not in columns:
+            found.append(f"질문의 '{r['text']}'은(는) {r['fragment']}인데 SQL이 {r['column']} 컬럼을 쓰지 않았습니다. "
+                         f"{SLOT_ERROR_MARK}.")
+            continue
+        sets = _sql_sets(tree, r["column"])
+        for kind, got in sets:
             if r["slot"] == "grade" and (kind == "range" or got != want):
                 found.append(f"질문의 {r['text']}은(는) {r['fragment']}입니다. {SLOT_ERROR_MARK}.")
-            elif r["slot"] == "value" and kind == "set" and got < want:
+            elif r["slot"] == "value" and kind == "set" and got and got < want:
                 found.append(f"'{r['text']}'은(는) {r['fragment']}입니다(값 일부만 쓰면 안 됩니다). {SLOT_ERROR_MARK}.")
+        # 값 묶음이 아닌 확정 값: 그 컬럼에 건 집합 중 어느 것도 그 값을 담지 않으면 다른 값을 쓴 것이다
+        # (UNION의 한 SELECT만 그 값을 쓰는 것은 괜찮다)
+        if r["slot"] == "value" and sets and all(k == "set" and not got & want for k, got in sets):
+            found.append(f"'{r['text']}'은(는) {r['fragment']}입니다(다른 값을 쓰면 안 됩니다). {SLOT_ERROR_MARK}.")
     return list(dict.fromkeys(found))
