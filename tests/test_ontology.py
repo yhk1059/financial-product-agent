@@ -36,6 +36,9 @@ DESIGN_DECISIONS = {"G1", "G2", "S1", "S2", "S3", "S4"}
 
 # 골든 질문에만 나오는 고유명사: examples 밖에 나오면 문항 전용 지식이 섞인 것이다
 GOLDEN_PROPER_NOUNS = ["에코프로", "KODEX 200", "TIGER 200", "중소기업은행", "기업은행", "삼성전자", "SK하이닉스", "마이다스"]
+# 홀드아웃(holdout_v2) 질문의 고유명사: ontology 어디에도 나오면 안 된다(홀드아웃 → 사전 누수)
+HOLDOUT_PROPER_NOUNS = ["카카오", "두산에너빌리티", "셀트리온", "삼성바이오로직스", "유한양행", "KODEX 고배당주", "PLUS 고배당주",
+                        "도로공사", "SPY", "LG에너지솔루션"]
 QUESTION_ID = re.compile(r"(?<![A-Za-z0-9])(C\d|H)-\d\d(?!\d)")  # 한글이 바로 붙어도 잡는다
 META_KEYS = {"motivated_by"}
 
@@ -297,6 +300,11 @@ def test_no_question_ids_outside_motivated_by(src, item_id, item):
 @pytest.mark.parametrize("src,item_id,item", ITEMS, ids=lambda x: x if isinstance(x, str) else "")
 def test_golden_proper_nouns_only_in_examples(src, item_id, item):
     assert not proper_noun_leaks(item, GOLDEN_PROPER_NOUNS, META_KEYS | {"examples"})
+
+
+@pytest.mark.parametrize("src,item_id,item", ITEMS, ids=lambda x: x if isinstance(x, str) else "")
+def test_no_holdout_proper_nouns(src, item_id, item):
+    assert not proper_noun_leaks(item, HOLDOUT_PROPER_NOUNS)
 
 
 @pytest.mark.parametrize("src,item_id,item", ITEMS, ids=lambda x: x if isinstance(x, str) else "")
