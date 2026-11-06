@@ -42,7 +42,7 @@ START → select_tables → [retrieve_knowledge] → [analyze_question → resol
 | `src/portfolio_agent/` | 에이전트 패키지. `graph.py`(그래프), `prompts.py` + `domain_rules.md`(프롬프트), `sql_guard.py`·`sql_rules.py`(SQL 검사·강제), `slots.py`(칸 해석), `context.py`·`retrieval.py`·`search.py`(온톨로지 조립·검색), `golden_eval.py`(채점), `config.py`(설정·경로 상수) |
 | `scripts/` | 스키마 캐시, 온톨로지 적재·임베딩, 골든 검증·채점 스크립트 |
 | `tests/` | pytest. 마커 `db`(PostgreSQL 필요), `llm`(HyperCLOVA X 호출) |
-| `golden/` | 골든 30문항 `questions_v2.yaml`, 홀드아웃 30문항 `holdout_v2.yaml`, 설계 `design.md`, 정답 스냅샷, `analysis/`(측정 기록). `archive/`는 v1 |
+| `golden/` | 골든 30문항 `questions_v2.yaml`, 홀드아웃 30문항 `holdout_v2.yaml`, 설계 `design.md`, 정답 스냅샷, `analysis/`(측정 기록) |
 | `ontology/` | 데이터 밖 정의 YAML(정본). PostgreSQL `knowledge` 스키마는 사본 |
 | `data/` | `schema_catalog.json`(추적)과 측정 산출물(gitignore) |
 | `docs/` | 설계 문서, 학습 노트, 이전 도메인 규칙 보관본, 포트폴리오 슬라이드 |
