@@ -49,7 +49,7 @@ pytest 마커: `db`(PostgreSQL 필요), `llm`(HyperCLOVA X 호출). 2026-11-07 �
 | `golden/` | `design.md`(정본), `questions_v2.yaml`·`gold_results_v2.json`, `holdout_v2.yaml`·`gold_results_holdout_v2.json`, `review_sheet.md`(생성물), `analysis/`(측정 기록) |
 | `ontology/` | `model.yaml`·`glossary.yaml`·`rules.yaml`·`review_log.yaml`(정본), `sql/knowledge_schema.sql` |
 | `data/` | `schema_catalog.json`(추적). `golden_runs/`·`retrieval_runs/`·`retrieval_cache/`·`context_runs/`·`eval_logs/`는 gitignore |
-| `docs/` | `plan_query_slots_design.md`(칸 설계), `온톨로지_따라하기_정리.md`(책 정리), `domain_rules_legacy.md`(옛 규칙, 에이전트는 읽지 않음), `portfolio/`(슬라이드 HTML·PDF 추적, PNG는 gitignore) |
+| `docs/` | `plan_query_slots_design.md`(칸 설계), `domain_rules_legacy.md`(옛 규칙, 에이전트는 읽지 않음), `portfolio/`(슬라이드 HTML·PDF 추적, PNG는 gitignore) |
 
 `.env.example`은 변수 이름만 적은 본보기입니다. 값은 `.env`에만 둡니다.
 
@@ -103,7 +103,7 @@ START → select_tables → [retrieve_knowledge] → [analyze_question → resol
 
 ## 온톨로지
 
-`ontology/`에는 골든 세트에서 뽑은 데이터 밖 정의가 있습니다(책 『온톨로지 따라하기』 4–5장). `--ontology off|ab|abc`(기본 `off`) 뒤에 연결돼 있습니다(위 `retrieve_knowledge` 참고).
+`ontology/`에는 골든 세트에서 뽑은 데이터 밖 정의가 있습니다(책 『온톨로지 따라하기』 4–5장, https://wikidocs.net/book/21274. 이 문서의 "책 n-n"은 그 책의 장·절이고, 정리 노트 `docs/온톨로지_따라하기_정리.md`는 2026-11-07에 삭제했다). `--ontology off|ab|abc`(기본 `off`) 뒤에 연결돼 있습니다(위 `retrieve_knowledge` 참고).
 - `model.yaml`: 개념(테이블, 입도, 식별자, 부모/구분자, `missing_means`/`zero_means`가 있는 속성)과 관계(`via`, 카디널리티, `derived`).
 - `glossary.yaml`: 용어 → `canonical`(`Concept`, `Concept.column`, 또는 `{ref, values}`), `surface_forms`(같은 말) vs `confusable_with`(다른 것), 데이터에 없는 개념은 `in_data: false`, 모든 표현이 canonical 값 전부를 뜻하면 `bundle: true`(MMF = MMF 값 둘 다. 표현이 값 하나를 가리키는 분류 용어에는 쓰지 않음), `order_up: first|last`(`order`의 어느 끝이 "이상"인지. `order`가 있으면 필수).
 - `rules.yaml`: `R-*` 규칙. `type` 조건/시점/예외/계산, `applies_to`, `when`/`then`, `overrides`, `depends_on`, `disclose`, `evidence`.
