@@ -23,13 +23,12 @@ import psycopg
 import yaml
 
 from portfolio_agent import db
-from portfolio_agent.config import EVAL_ONTOLOGY_MODES, PROJECT_ROOT, settings
+from portfolio_agent.config import DATA_DIR, EVAL_ONTOLOGY_MODES, GOLDEN_DIR, ONTOLOGY_DIR, PROJECT_ROOT, settings
 from portfolio_agent.golden_eval import grade, sql_sha, to_json
 from portfolio_agent.sql_guard import SQLGuardError, validate
 
 VERSION = "v2"
-GOLDEN_DIR = PROJECT_ROOT / "golden"
-RUNS_DIR = PROJECT_ROOT / "data" / "golden_runs"
+RUNS_DIR = DATA_DIR / "golden_runs"
 CATEGORIES = ["C1", "C2", "C3", "C4", "C5", "C6"]
 HOLDOUT_VERSION = "holdout_v2"
 # 문항 묶음 → (버전 표기, 문항 파일, 정답 스냅샷). 홀드아웃은 고치지 않는다(바꾸면 holdout_v3로 올린다)
@@ -86,7 +85,7 @@ def oracle_items() -> dict[str, list[str]]:
     """
     items: dict[str, list[str]] = defaultdict(list)
     for name, key in (("glossary", "terms"), ("rules", "rules")):
-        for item in yaml.safe_load((PROJECT_ROOT / "ontology" / f"{name}.yaml").read_text())[key]:
+        for item in yaml.safe_load((ONTOLOGY_DIR / f"{name}.yaml").read_text())[key]:
             for qid in item.get("motivated_by") or []:
                 items[qid].append(item["id"])
     return dict(items)

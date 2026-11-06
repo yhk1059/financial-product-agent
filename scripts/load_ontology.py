@@ -11,17 +11,14 @@ uv run python scripts/load_ontology.py --dry-run  # DB 없이 행 수만 계산
 import argparse
 import hashlib
 import json
-import os
 import subprocess
 from datetime import datetime, timezone
 
-import psycopg
 import yaml
 
-from portfolio_agent.config import PROJECT_ROOT
+from portfolio_agent import db
+from portfolio_agent.config import KNOWLEDGE_DDL_PATH, ONTOLOGY_DIR, PROJECT_ROOT
 
-ONTOLOGY_DIR = PROJECT_ROOT / "ontology"
-DDL_PATH = ONTOLOGY_DIR / "sql" / "knowledge_schema.sql"
 FILES = ("model.yaml", "glossary.yaml", "rules.yaml", "review_log.yaml")
 
 # 삽입 순서 (삭제는 역순)
@@ -160,19 +157,12 @@ def _git() -> tuple[str | None, bool | None]:
         return None, None
 
 
-def connect() -> psycopg.Connection:
-    user, password = os.getenv("KNOWLEDGE_PGUSER"), os.getenv("KNOWLEDGE_PGPASSWORD")
-    if not user or not password:
-        raise SystemExit(".env에 KNOWLEDGE_PGUSER와 KNOWLEDGE_PGPASSWORD가 필요합니다.")
-    return psycopg.connect(user=user, password=password, connect_timeout=10)
-
-
 def load(rows: dict[str, list[tuple]]) -> dict[str, int]:
     file_sha = {f: hashlib.sha256((ONTOLOGY_DIR / f).read_bytes()).hexdigest() for f in FILES}
     counts = {t: len(r) for t, r in rows.items()}
     commit, dirty = _git()
-    with connect() as conn, conn.transaction(), conn.cursor() as cur:
-        cur.execute(DDL_PATH.read_text(encoding="utf-8"))
+    with db.connect_knowledge() as conn, conn.transaction(), conn.cursor() as cur:
+        cur.execute(KNOWLEDGE_DDL_PATH.read_text(encoding="utf-8"))
         cur.execute("SET LOCAL search_path = knowledge, public")
         for table in ["source_version", *reversed(TABLES)]:
             cur.execute(f"DELETE FROM {table}")

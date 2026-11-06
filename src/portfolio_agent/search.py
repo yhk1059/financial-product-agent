@@ -10,13 +10,13 @@ import logging
 from functools import lru_cache
 
 from . import db
-from .config import PROJECT_ROOT
+from .config import DATA_DIR
 from .embedding import EMBED_MODEL, VARIANT, embed, to_pgvector
 from .retrieval import DEFAULT_K, FIXED_ITEMS, keyword_rank, label_forms, order_forms, rrf
 
 log = logging.getLogger(__name__)
 
-CACHE_PATH = PROJECT_ROOT / "data" / "retrieval_cache" / f"questions_{EMBED_MODEL}.json"
+CACHE_PATH = DATA_DIR / "retrieval_cache" / f"questions_{EMBED_MODEL}.json"
 
 
 @lru_cache
@@ -45,6 +45,19 @@ def vector_rank(vec: list[float]) -> list[str]:
     _, rows = db.fetch("SELECT item_id FROM knowledge.item_embedding WHERE model = %s AND variant = %s"
                        " ORDER BY vec <=> %s::vector, item_id", (EMBED_MODEL, VARIANT, v))
     return [r[0] for r in rows]
+
+
+def motivation_gold(candidates: set[str]) -> dict[str, set[str]]:
+    """문항별 정답 항목(knowledge.item_motivation ∩ candidates). 읽기 계정에는 막혀 있어 knowledge 계정으로 읽는다.
+    scripts/eval_retrieval.py·render_context.py 채점용."""
+    with db.connect_knowledge() as conn, conn.cursor() as cur:
+        cur.execute("SET TRANSACTION READ ONLY")
+        cur.execute("SELECT question_id, item_id FROM knowledge.item_motivation")
+        gold: dict[str, set[str]] = {}
+        for qid, item in cur.fetchall():
+            if item in candidates:
+                gold.setdefault(qid, set()).add(item)
+    return gold
 
 
 def _key(question: str) -> str:

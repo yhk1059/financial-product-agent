@@ -6,15 +6,14 @@ from collections import Counter
 import pytest
 import yaml
 
-from portfolio_agent.config import ALLOWED_TABLES, PROJECT_ROOT
+from portfolio_agent.config import ALLOWED_TABLES, GOLDEN_DIR
 
-GOLDEN = PROJECT_ROOT / "golden"
 SETS = {
-    "golden": yaml.safe_load((GOLDEN / "questions_v2.yaml").read_text()),
-    "holdout": yaml.safe_load((GOLDEN / "holdout_v2.yaml").read_text()),
+    "golden": yaml.safe_load((GOLDEN_DIR / "questions_v2.yaml").read_text()),
+    "holdout": yaml.safe_load((GOLDEN_DIR / "holdout_v2.yaml").read_text()),
 }
 QUESTIONS = [q for qs in SETS.values() for q in qs]  # 문항 id는 묶음끼리 겹치지 않는다(C*-nn, H-nn)
-POLICIES = set(re.findall(r"\*\*(P-[A-Z]+)\*\*", (GOLDEN / "design.md").read_text()))
+POLICIES = set(re.findall(r"\*\*(P-[A-Z]+)\*\*", (GOLDEN_DIR / "design.md").read_text()))
 
 REQUIRED = {"id", "category", "difficulty", "tables", "question", "interpretation", "policy_refs", "answer_type"}
 TARGET_PER_CATEGORY = {"C1": 7, "C2": 7, "C3": 5, "C4": 6, "C5": 2, "C6": 3}

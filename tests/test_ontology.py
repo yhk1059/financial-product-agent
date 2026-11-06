@@ -9,19 +9,16 @@ import sqlglot
 import yaml
 from sqlglot import exp
 
-from portfolio_agent.config import ALLOWED_TABLES, PROJECT_ROOT
+from portfolio_agent.config import ALLOWED_TABLES, GOLDEN_DIR, ONTOLOGY_DIR
 from portfolio_agent.schema_catalog import load_catalog
 
-ONTOLOGY = PROJECT_ROOT / "ontology"
-GOLDEN = PROJECT_ROOT / "golden"
-
-MODEL = yaml.safe_load((ONTOLOGY / "model.yaml").read_text())
-GLOSSARY = yaml.safe_load((ONTOLOGY / "glossary.yaml").read_text())["terms"]
-RULES = yaml.safe_load((ONTOLOGY / "rules.yaml").read_text())["rules"]
-REVIEW = yaml.safe_load((ONTOLOGY / "review_log.yaml").read_text())
-QUESTIONS = yaml.safe_load((GOLDEN / "questions_v2.yaml").read_text())
-POLICIES = set(re.findall(r"\*\*(P-[A-Z]+)\*\*", (GOLDEN / "design.md").read_text()))
-WORKSHEET = (GOLDEN / "analysis" / "extraction_worksheet.md").read_text()
+MODEL = yaml.safe_load((ONTOLOGY_DIR / "model.yaml").read_text())
+GLOSSARY = yaml.safe_load((ONTOLOGY_DIR / "glossary.yaml").read_text())["terms"]
+RULES = yaml.safe_load((ONTOLOGY_DIR / "rules.yaml").read_text())["rules"]
+REVIEW = yaml.safe_load((ONTOLOGY_DIR / "review_log.yaml").read_text())
+QUESTIONS = yaml.safe_load((GOLDEN_DIR / "questions_v2.yaml").read_text())
+POLICIES = set(re.findall(r"\*\*(P-[A-Z]+)\*\*", (GOLDEN_DIR / "design.md").read_text()))
+WORKSHEET = (GOLDEN_DIR / "analysis" / "extraction_worksheet.md").read_text()
 
 CONCEPTS = {c["id"]: c for c in MODEL["concepts"]}
 RELATIONS = {r["id"]: r for r in MODEL["relations"]}

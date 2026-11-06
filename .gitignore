@@ -25,3 +25,6 @@ data/retrieval_runs/
 data/retrieval_cache/
 data/context_runs/
 data/eval_logs/
+
+# Portfolio slides: PNG is rendered from the HTML next to it
+docs/portfolio/*.png

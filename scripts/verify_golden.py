@@ -20,11 +20,9 @@ import yaml
 from sqlglot import exp
 
 from portfolio_agent import db
-from portfolio_agent.config import PROJECT_ROOT, settings
+from portfolio_agent.config import GOLDEN_DIR, settings
 from portfolio_agent.golden_eval import sql_sha
 from portfolio_agent.sql_guard import SQLGuardError, validate
-
-GOLDEN_DIR = PROJECT_ROOT / "golden"
 
 
 def _json(v):

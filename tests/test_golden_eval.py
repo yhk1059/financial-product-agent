@@ -5,7 +5,7 @@ import json
 import pytest
 import yaml
 
-from portfolio_agent.config import PROJECT_ROOT
+from portfolio_agent.config import GOLDEN_DIR
 from portfolio_agent.golden_eval import (
     check_answer,
     check_forbidden,
@@ -17,9 +17,8 @@ from portfolio_agent.golden_eval import (
     values_equal,
 )
 
-GOLDEN = PROJECT_ROOT / "golden"
-QUESTIONS = {q["id"]: q for q in yaml.safe_load((GOLDEN / "questions_v2.yaml").read_text())}
-GOLD = json.loads((GOLDEN / "gold_results_v2.json").read_text())
+QUESTIONS = {q["id"]: q for q in yaml.safe_load((GOLDEN_DIR / "questions_v2.yaml").read_text())}
+GOLD = json.loads((GOLDEN_DIR / "gold_results_v2.json").read_text())
 
 
 def query(cols, rows, ok=True, output=""):

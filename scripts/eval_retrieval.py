@@ -16,30 +16,17 @@ import time
 from datetime import datetime
 
 import yaml
-from load_ontology import connect
 
-from portfolio_agent.config import PROJECT_ROOT
+from portfolio_agent.config import DATA_DIR, GOLDEN_DIR, PROJECT_ROOT
 from portfolio_agent.embedding import EMBED_MODEL, VARIANT
 from portfolio_agent.retrieval import DEFAULT_K, DEFAULT_METHOD, FIXED_ITEMS, keyword_rank, recall_at, rrf
-from portfolio_agent.search import is_cached, load_index, question_vector, vector_rank
+from portfolio_agent.search import is_cached, load_index, motivation_gold, question_vector, vector_rank
 
 QUESTIONS_PATHS = {
-    "golden": PROJECT_ROOT / "golden" / "questions_v2.yaml",
+    "golden": GOLDEN_DIR / "questions_v2.yaml",
 }
-RUNS_DIR = PROJECT_ROOT / "data" / "retrieval_runs"
+RUNS_DIR = DATA_DIR / "retrieval_runs"
 METHODS = ("vector", "keyword", "hybrid")
-
-
-def load_gold(candidates: set[str]) -> dict[str, set[str]]:
-    """문항별 정답 항목. item_motivation은 읽기 계정에 막혀 있어 knowledge 계정으로 읽는다."""
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute("SET TRANSACTION READ ONLY")
-        cur.execute("SELECT question_id, item_id FROM knowledge.item_motivation")
-        gold: dict[str, set[str]] = {}
-        for qid, item in cur.fetchall():
-            if item in candidates:
-                gold.setdefault(qid, set()).add(item)
-    return gold
 
 
 def question_vectors(questions: list[dict]) -> dict[str, list[float]]:
@@ -67,7 +54,7 @@ def main():
     questions = yaml.safe_load(QUESTIONS_PATHS[args.qset].read_text(encoding="utf-8"))
     term_forms, rule_targets, target_forms, embedded = load_index()
     candidates = embedded - FIXED_ITEMS
-    gold = load_gold(candidates)
+    gold = motivation_gold(candidates)
     vectors = question_vectors(questions)
 
     results = []

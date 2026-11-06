@@ -17,16 +17,16 @@ import statistics
 from datetime import datetime
 
 import yaml
-from eval_retrieval import QUESTIONS_PATHS, load_gold
 
-from portfolio_agent.config import PROJECT_ROOT, settings
+from portfolio_agent.config import DATA_DIR, GOLDEN_DIR, PROJECT_ROOT, settings
 from portfolio_agent.context import build_context, get_knowledge
 from portfolio_agent.prompts import GENERATE_QUERY, NO_RULES, generate_prompt, rules_for
 from portfolio_agent.retrieval import DEFAULT_K, FIXED_ITEMS
 from portfolio_agent.schema_catalog import schema_card
-from portfolio_agent.search import load_index, search
+from portfolio_agent.search import load_index, motivation_gold, search
 
-RUNS_DIR = PROJECT_ROOT / "data" / "context_runs"
+QUESTIONS_PATH = GOLDEN_DIR / "questions_v2.yaml"
+RUNS_DIR = DATA_DIR / "context_runs"
 
 
 def _stats(xs: list[int]) -> str:
@@ -38,9 +38,9 @@ def main():
     ap.add_argument("--label", default="render_v1")
     args = ap.parse_args()
 
-    questions = yaml.safe_load(QUESTIONS_PATHS["golden"].read_text(encoding="utf-8"))
+    questions = yaml.safe_load(QUESTIONS_PATH.read_text(encoding="utf-8"))
     candidates = load_index()[3] - FIXED_ITEMS
-    gold = load_gold(candidates)
+    gold = motivation_gold(candidates)
     kn = get_knowledge()
 
     out_dir = RUNS_DIR / args.label

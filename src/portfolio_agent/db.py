@@ -1,5 +1,6 @@
 """PostgreSQL 읽기 전용 접속과 쿼리 실행."""
 
+import os
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -17,6 +18,14 @@ def connect() -> Iterator[psycopg.Connection]:
         conn.execute(f"SET statement_timeout = {int(settings.statement_timeout_ms)}")
         conn.execute("SET search_path = public")
         yield conn
+
+
+def connect_knowledge() -> psycopg.Connection:
+    """KNOWLEDGE_PGUSER/KNOWLEDGE_PGPASSWORD(knowledge 스키마 전용 쓰기 계정)로 접속한다. 적재·임베딩·채점 스크립트용."""
+    user, password = os.getenv("KNOWLEDGE_PGUSER"), os.getenv("KNOWLEDGE_PGPASSWORD")
+    if not user or not password:
+        raise SystemExit(".env에 KNOWLEDGE_PGUSER와 KNOWLEDGE_PGPASSWORD가 필요합니다.")
+    return psycopg.connect(user=user, password=password, connect_timeout=10)
 
 
 def fetch(sql: str, params: Any = None) -> tuple[list[str], list[tuple]]:

@@ -11,8 +11,8 @@ uv run python scripts/embed_ontology.py --dry-run  # API·쓰기 없이 조립�
 import argparse
 import time
 
-from load_ontology import DDL_PATH, connect
-
+from portfolio_agent import db
+from portfolio_agent.config import KNOWLEDGE_DDL_PATH
 from portfolio_agent.embedding import (
     EMBED_MODEL,
     VARIANT,
@@ -59,9 +59,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="API를 부르지 않고 DB에도 쓰지 않는다")
     args = ap.parse_args()
 
-    with connect() as conn, conn.cursor() as cur:
+    with db.connect_knowledge() as conn, conn.cursor() as cur:
         if not args.dry_run:
-            cur.execute(DDL_PATH.read_text(encoding="utf-8"))
+            cur.execute(KNOWLEDGE_DDL_PATH.read_text(encoding="utf-8"))
             conn.commit()
         docs = build_docs(cur)
         existing = {}
@@ -94,7 +94,7 @@ def main():
     if todo:
         print()
 
-    with connect() as conn, conn.transaction(), conn.cursor() as cur:
+    with db.connect_knowledge() as conn, conn.transaction(), conn.cursor() as cur:
         if stale:
             cur.execute(
                 "DELETE FROM knowledge.item_embedding WHERE model = %s AND variant = %s AND item_id = ANY(%s)",

@@ -27,7 +27,12 @@ ONTOLOGY_MODES: tuple[str, ...] = ("off", "ab", "abc")
 # 평가 전용: oracle = A·B층 + 검색 대신 문항의 정답 항목(motivated_by)을 C층으로. 대화 CLI에서는 쓰지 않는다
 EVAL_ONTOLOGY_MODES: tuple[str, ...] = (*ONTOLOGY_MODES, "oracle")
 
-SCHEMA_CACHE_PATH = PROJECT_ROOT / "data" / "schema_catalog.json"
+# 프로젝트 안 고정 경로. 스크립트·테스트도 이 상수를 쓴다
+DATA_DIR = PROJECT_ROOT / "data"
+GOLDEN_DIR = PROJECT_ROOT / "golden"
+ONTOLOGY_DIR = PROJECT_ROOT / "ontology"
+KNOWLEDGE_DDL_PATH = ONTOLOGY_DIR / "sql" / "knowledge_schema.sql"
+SCHEMA_CACHE_PATH = DATA_DIR / "schema_catalog.json"
 
 
 @dataclass(frozen=True)

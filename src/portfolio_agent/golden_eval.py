@@ -1,8 +1,8 @@
 """골든 데이터셋 채점 함수 (golden/design.md 5절). DB·LLM 없이 동작하는 순수 함수만 둔다.
 
 입력 형식
-- q: questions_v1.yaml 문항 하나
-- gold: gold_results_v1.json 항목 하나 ({"columns", "rows"})
+- q: questions_v2.yaml 문항 하나
+- gold: gold_results_v2.json 항목 하나 ({"columns", "rows"})
 - record: 실행 기록. AskTrace 필드에 더해 queries[i]마다 재실행 결과
   {"rerun_columns", "rerun_rows"}(성공한 쿼리만)를 가진다. 행 값은 to_json으로 바꾼 값이다.
 """
