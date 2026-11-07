@@ -26,5 +26,9 @@ data/retrieval_cache/
 data/context_runs/
 data/eval_logs/
 
-# Portfolio slides: PNG is rendered from the HTML next to it
-docs/portfolio/*.png
+# Local only (not published): design docs, slides, data values
+docs/
+data/schema_catalog.json
+golden/gold_results_*.json
+golden/review_sheet.md
+golden/analysis/

@@ -46,10 +46,10 @@ pytest 마커: `db`(PostgreSQL 필요), `llm`(HyperCLOVA X 호출). 2026-11-07 �
 | `src/portfolio_agent/` | 에이전트 패키지(평면 구조, 모듈 18개). 하위 패키지 분리는 2026-11-06에 보류했다 |
 | `scripts/` | 스키마 캐시·온톨로지 적재·임베딩·골든 검증·채점. 패키지만 import하고 스크립트끼리는 import하지 않는다 |
 | `tests/` | 모듈별 pytest 파일 하나씩 |
-| `golden/` | `design.md`(정본), `questions_v2.yaml`·`gold_results_v2.json`, `holdout_v2.yaml`·`gold_results_holdout_v2.json`, `review_sheet.md`(생성물), `analysis/`(측정 기록) |
+| `golden/` | `design.md`(정본), `questions_v2.yaml`·`gold_results_v2.json`, `holdout_v2.yaml`·`gold_results_holdout_v2.json`, `review_sheet.md`(생성물), `analysis/`(측정 기록). `gold_results_*.json`·`review_sheet.md`·`analysis/`는 데이터 값이 들어 있어 gitignore(로컬 전용) |
 | `ontology/` | `model.yaml`·`glossary.yaml`·`rules.yaml`·`review_log.yaml`(정본), `sql/knowledge_schema.sql` |
-| `data/` | `schema_catalog.json`(추적). `golden_runs/`·`retrieval_runs/`·`retrieval_cache/`·`context_runs/`·`eval_logs/`는 gitignore |
-| `docs/` | `plan_query_slots_design.md`(칸 설계), `domain_rules_legacy.md`(옛 규칙, 에이전트는 읽지 않음), `portfolio/`(슬라이드 HTML·PDF 추적, PNG는 gitignore) |
+| `data/` | `schema_catalog.json`(gitignore, `build_schema_cache.py`로 생성). `golden_runs/`·`retrieval_runs/`·`retrieval_cache/`·`context_runs/`·`eval_logs/`는 gitignore |
+| `docs/` | `plan_query_slots_design.md`(칸 설계), `domain_rules_legacy.md`(옛 규칙, 에이전트는 읽지 않음), `portfolio/`(슬라이드 HTML·PDF·PNG). 폴더 전체가 gitignore(로컬 전용) |
 
 `.env.example`은 변수 이름만 적은 본보기입니다. 값은 `.env`에만 둡니다.
 
