@@ -97,7 +97,7 @@ START → select_tables → [retrieve_knowledge] → [analyze_question → resol
 
 출력은 `data/golden_runs/`(gitignore)에 갑니다. 현재 기준선만 거기 두고 옛 실행은 `data/golden_runs/archive/`로 옮깁니다(`--compare archive/<label> ...`로 비교). 콘솔 출력(429 재시도, 문항별 표)은 리다이렉션으로 `data/eval_logs/<label>.log`에 저장할 수 있습니다(gitignore. 스크립트가 쓰지 않음). `golden/analysis/runs.md`에 모든 실행의 커밋·모드·점수·상태를 적습니다. 새 실행마다 행을 더합니다. 라벨은 `<commit>_<mode>[_enf][_slots][_x<runs>]`(`_enf` = `--enforce`, `_slots` = `--slots`. 옛 `_plan` 라벨은 삭제된 `--plan`, 옛 `_holdout` 라벨은 삭제된 `holdout_v1`). 프롬프트나 `domain_rules.md`를 바꾸면 평가를 다시 돌립니다(또는 영향받는 id만 `--only`). 채점 규칙을 바꾼 뒤에는 에이전트를 다시 돌리지 말고 `--rescore`를 씁니다.
 
-현재 기준선(2026-11-01, `runs.md`): 골든 `f23859c_abc_enf_slots_x3` 85/90, 홀드아웃 `2c6dcd5_abc_enf_slots_holdout_x3` 61/90. 구성 비교는 `golden/analysis/f23859c_config_x3.md`와 `f4a7ba6_holdout_config_x3.md`에 있습니다.
+현재 기준선(2026-11-01, `runs.md`): 골든 `f23859c_abc_enf_slots_x3` 85/90, 홀드아웃 `2c6dcd5_abc_enf_slots_holdout_x3` 61/90. 구성 비교는 `golden/analysis/f23859c_config_x3.md`와 `f4a7ba6_holdout_config_x3.md`에 있습니다. 라벨의 커밋 해시는 2026-11-07 히스토리 재작성 이전 값이고, 새 해시 대응표는 `runs.md` 끝에 있습니다.
 
 **홀드아웃:** `golden/holdout_v2.yaml`(30문항, H-01–H-30, 2026-11-01 고정)과 `gold_results_holdout_v2.json`. `--set holdout`으로 돌리고 라벨은 `<commit>_<mode>[_enf][_slots]_holdout`입니다. 분류·테이블·채점은 골든과 같지만 문항마다 같은 정책을 다른 맥락(다른 컬럼·방향·집계·테이블 쌍·이름)에서 묻기 때문에, 골든에 맞춘 코드와 온톨로지가 일반화되는지 잽니다. 홀드아웃 점수에 맞춰 튜닝하지 마세요: 골든에서 고치고 홀드아웃은 한 번만 잽니다. 홀드아웃의 고유명사는 온톨로지나 슬롯 코드에 나오면 안 됩니다(`tests/test_ontology.py`의 `HOLDOUT_PROPER_NOUNS`). `tests/test_golden_schema.py`가 두 세트를 검사합니다. `holdout_v1`(14문항)은 2026-10-31에 삭제했고 `runs.md`의 점수는 기록일 뿐입니다.
 
