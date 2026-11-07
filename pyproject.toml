@@ -1,5 +1,5 @@
 [project]
-name = "portfolio-agent"
+name = "financial-product-agent"
 version = "0.1.0"
 description = "금융상품 테이블 질의응답 SQL 에이전트 (LangGraph + HyperCLOVA X)"
 readme = "README.md"
@@ -21,7 +21,7 @@ dev = [
 ]
 
 [project.scripts]
-portfolio-agent = "portfolio_agent.cli:main"
+financial-product-agent = "financial_product_agent.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]

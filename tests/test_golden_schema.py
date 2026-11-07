@@ -6,7 +6,7 @@ from collections import Counter
 import pytest
 import yaml
 
-from portfolio_agent.config import ALLOWED_TABLES, GOLDEN_DIR
+from financial_product_agent.config import ALLOWED_TABLES, GOLDEN_DIR
 
 SETS = {
     "golden": yaml.safe_load((GOLDEN_DIR / "questions_v2.yaml").read_text()),

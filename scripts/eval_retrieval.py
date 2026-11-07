@@ -5,7 +5,7 @@ uv run python scripts/eval_retrieval.py [--label 이름] [--ks 5,10,15,20] [--de
 - 정답: knowledge.item_motivation(골든 id → 항목). C층 용어·규칙만 남긴다. A·B층 항목은 항상 들어가므로 뺀다.
 - 방식: vector(pgvector 코사인), keyword(이름·같은 말 일치, 규칙은 적용 대상에서 물려받음), hybrid(RRF).
   순위에서도 A·B층 항목을 빼고 상위 k를 자른다 (렌더링 때 어차피 따로 들어가므로).
-- 질문 임베딩은 data/retrieval_cache/에 캐시한다(portfolio_agent.search, 에이전트와 같은 캐시).
+- 질문 임베딩은 data/retrieval_cache/에 캐시한다(financial_product_agent.search, 에이전트와 같은 캐시).
   결과는 data/retrieval_runs/{label}.json.
 - 기본 방식·k는 retrieval.DEFAULT_METHOD/DEFAULT_K. 이 값은 골든으로만 정한다.
 """
@@ -17,10 +17,10 @@ from datetime import datetime
 
 import yaml
 
-from portfolio_agent.config import DATA_DIR, GOLDEN_DIR, PROJECT_ROOT
-from portfolio_agent.embedding import EMBED_MODEL, VARIANT
-from portfolio_agent.retrieval import DEFAULT_K, DEFAULT_METHOD, FIXED_ITEMS, keyword_rank, recall_at, rrf
-from portfolio_agent.search import is_cached, load_index, motivation_gold, question_vector, vector_rank
+from financial_product_agent.config import DATA_DIR, GOLDEN_DIR, PROJECT_ROOT
+from financial_product_agent.embedding import EMBED_MODEL, VARIANT
+from financial_product_agent.retrieval import DEFAULT_K, DEFAULT_METHOD, FIXED_ITEMS, keyword_rank, recall_at, rrf
+from financial_product_agent.search import is_cached, load_index, motivation_gold, question_vector, vector_rank
 
 QUESTIONS_PATHS = {
     "golden": GOLDEN_DIR / "questions_v2.yaml",

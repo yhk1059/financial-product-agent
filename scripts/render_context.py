@@ -4,7 +4,7 @@ uv run python scripts/render_context.py [--label render_v1]
 
 - 테이블 선택 대신 골든 정답 테이블(tables)을 쓴다. 테이블 선택이 늘 맞는다고 가정하므로 실제보다 작게 나올 수 있다.
   구성종목 테이블이 있으면 select_tables처럼 pref01n001을 더한다.
-- C층은 portfolio_agent.search.search (하이브리드 상위 DEFAULT_K개, 에이전트·eval_retrieval.py와 같은 순위),
+- C층은 financial_product_agent.search.search (하이브리드 상위 DEFAULT_K개, 에이전트·eval_retrieval.py와 같은 순위),
   질문 임베딩은 캐시를 쓴다.
 - 프롬프트 길이는 글자 수로 잰다(HCX 토크나이저가 로컬에 없다). 온톨로지를 넣은 프롬프트는
   prompts.GENERATE_QUERY 틀에 {rules}=조립 규칙, {schema}=스키마 카드 + A층 블록을 넣어 만든다.
@@ -18,12 +18,12 @@ from datetime import datetime
 
 import yaml
 
-from portfolio_agent.config import DATA_DIR, GOLDEN_DIR, PROJECT_ROOT, settings
-from portfolio_agent.context import build_context, get_knowledge
-from portfolio_agent.prompts import GENERATE_QUERY, NO_RULES, generate_prompt, rules_for
-from portfolio_agent.retrieval import DEFAULT_K, FIXED_ITEMS
-from portfolio_agent.schema_catalog import schema_card
-from portfolio_agent.search import load_index, motivation_gold, search
+from financial_product_agent.config import DATA_DIR, GOLDEN_DIR, PROJECT_ROOT, settings
+from financial_product_agent.context import build_context, get_knowledge
+from financial_product_agent.prompts import GENERATE_QUERY, NO_RULES, generate_prompt, rules_for
+from financial_product_agent.retrieval import DEFAULT_K, FIXED_ITEMS
+from financial_product_agent.schema_catalog import schema_card
+from financial_product_agent.search import load_index, motivation_gold, search
 
 QUESTIONS_PATH = GOLDEN_DIR / "questions_v2.yaml"
 RUNS_DIR = DATA_DIR / "context_runs"

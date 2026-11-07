@@ -1,6 +1,6 @@
 """context.py 조립 함수 테스트 (DB·LLM 없음). 실제 온톨로지 대신 작은 가짜 지식 묶음을 쓴다."""
 
-from portfolio_agent.context import Knowledge, build_context, expand, item_tables, ref_text, render_rule
+from financial_product_agent.context import Knowledge, build_context, expand, item_tables, ref_text, render_rule
 
 
 def _item(kind, label=None, definition=None, note=None):

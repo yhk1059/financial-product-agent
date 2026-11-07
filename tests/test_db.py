@@ -1,7 +1,7 @@
 import psycopg
 import pytest
 
-from portfolio_agent import db
+from financial_product_agent import db
 
 pytestmark = pytest.mark.db
 

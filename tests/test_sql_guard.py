@@ -1,6 +1,6 @@
 import pytest
 
-from portfolio_agent.sql_guard import ALIAS_SPACE_HINT, SQLGuardError, validate
+from financial_product_agent.sql_guard import ALIAS_SPACE_HINT, SQLGuardError, validate
 
 
 @pytest.mark.parametrize(

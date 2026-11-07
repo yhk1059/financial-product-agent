@@ -1,7 +1,7 @@
 import pytest
 
-from portfolio_agent import tools
-from portfolio_agent.tools import _position_context, make_run_query, run_query
+from financial_product_agent import tools
+from financial_product_agent.tools import _position_context, make_run_query, run_query
 
 SQL = 'SELECT COUNT(*) FROM "h" AS "a" JOIN "p" AS "b" ON "a"."item_id" = "b" = "pd_itm_no" LIMIT 200'
 

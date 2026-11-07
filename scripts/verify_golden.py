@@ -19,10 +19,10 @@ import sqlglot
 import yaml
 from sqlglot import exp
 
-from portfolio_agent import db
-from portfolio_agent.config import GOLDEN_DIR, settings
-from portfolio_agent.golden_eval import sql_sha
-from portfolio_agent.sql_guard import SQLGuardError, validate
+from financial_product_agent import db
+from financial_product_agent.config import GOLDEN_DIR, settings
+from financial_product_agent.golden_eval import sql_sha
+from financial_product_agent.sql_guard import SQLGuardError, validate
 
 
 def _json(v):

@@ -1,4 +1,4 @@
-# portfolio-agent
+# financial-product-agent
 
 금융상품 테이블(PostgreSQL `public` 스키마 5개)에 자연어로 질문하면 SQL로 조회·집계해서 답하는 에이전트입니다.
 LangGraph + HyperCLOVA X(`HCX-007`, `langchain-naver`의 `ChatClovaX`)로 만들었습니다.
@@ -17,9 +17,9 @@ LangGraph + HyperCLOVA X(`HCX-007`, `langchain-naver`의 `ChatClovaX`)로 만들
 ```bash
 uv sync
 cp .env.example .env                        # 값을 채운다
-uv run portfolio-agent                      # 대화 모드 (/new: 새 대화, exit: 종료)
-uv run portfolio-agent -q "삼성전자를 편입한 국내 ETF는 몇 개야?" --show-sql
-uv run portfolio-agent -q "질문" --show-sql --ontology abc --enforce --slots   # 골든 기준선 구성
+uv run financial-product-agent             # 대화 모드 (/new: 새 대화, exit: 종료)
+uv run financial-product-agent -q "삼성전자를 편입한 국내 ETF는 몇 개야?" --show-sql
+uv run financial-product-agent -q "질문" --show-sql --ontology abc --enforce --slots   # 골든 기준선 구성
 ```
 - `--ontology off|ab|abc` (기본 `off`): `ontology/`의 개념·용어·규칙을 프롬프트에 넣습니다. `abc`는 질문으로 C층을 검색해 더합니다.
 - `--enforce` (기본 off): 기계적으로 검사할 수 있는 규칙(`sql_rules.py`)을 코드가 강제합니다. SQL 재작성, 실행 전 차단, 답변의 `[적용 조건]`.
@@ -39,7 +39,7 @@ START → select_tables → [retrieve_knowledge] → [analyze_question → resol
 ## 디렉터리
 | 경로 | 내용 |
 |---|---|
-| `src/portfolio_agent/` | 에이전트 패키지. `graph.py`(그래프), `prompts.py` + `domain_rules.md`(프롬프트), `sql_guard.py`·`sql_rules.py`(SQL 검사·강제), `slots.py`(칸 해석), `context.py`·`retrieval.py`·`search.py`(온톨로지 조립·검색), `golden_eval.py`(채점), `config.py`(설정·경로 상수) |
+| `src/financial_product_agent/` | 에이전트 패키지. `graph.py`(그래프), `prompts.py` + `domain_rules.md`(프롬프트), `sql_guard.py`·`sql_rules.py`(SQL 검사·강제), `slots.py`(칸 해석), `context.py`·`retrieval.py`·`search.py`(온톨로지 조립·검색), `golden_eval.py`(채점), `config.py`(설정·경로 상수) |
 | `scripts/` | 스키마 캐시, 온톨로지 적재·임베딩, 골든 검증·채점 스크립트 |
 | `tests/` | pytest. 마커 `db`(PostgreSQL 필요), `llm`(HyperCLOVA X 호출) |
 | `golden/` | 골든 30문항 `questions_v2.yaml`, 홀드아웃 30문항 `holdout_v2.yaml`, 설계 `design.md` |

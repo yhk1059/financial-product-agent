@@ -5,9 +5,9 @@ import re
 
 import pytest
 
-from portfolio_agent import prompts, slots
-from portfolio_agent.context import Knowledge
-from portfolio_agent.slots import (grade_index, grade_range, name_notes, normalize_name, render_resolved, resolve,
+from financial_product_agent import prompts, slots
+from financial_product_agent.context import Knowledge
+from financial_product_agent.slots import (grade_index, grade_range, name_notes, normalize_name, render_resolved, resolve,
                                    slot_violations, validate_slots)
 
 CREDIT = ["AAA", "AA+", "AA0", "AA-", "A+", "A0", "A-"]
@@ -350,7 +350,7 @@ def test_no_proper_nouns_in_slot_code():
 
 # ───────────────────────── 질문에서 코드가 찾는 범주 값 ─────────────────────────
 
-from portfolio_agent.slots import scan_values
+from financial_product_agent.slots import scan_values
 
 
 def _kn_values():
@@ -398,7 +398,7 @@ def test_value_slot_requires_its_column():
 
 
 def test_candidates_prefer_column_of_confirmed_value():
-    from portfolio_agent.slots import prefer_confirmed_columns
+    from financial_product_agent.slots import prefer_confirmed_columns
     cand = {"slot": "value", "status": "candidates", "text": "주식형", "table": "t", "column": "", "values": ["주식형", "주식형"],
             "fragment": "a = '주식형', b = '주식형'", "note": "", "kind": "", "options": [["a", "주식형"], ["b", "주식형"]]}
     conf = {"slot": "value", "status": "confirmed", "text": "해외주식형", "table": "t", "column": "b", "values": ["해외주식형"],

@@ -1,12 +1,12 @@
 """터미널 대화형 CLI.
 
 사용법:
-    uv run portfolio-agent              # 대화 모드
-    uv run portfolio-agent -q "질문"     # 한 번만 질문
-    uv run portfolio-agent --show-sql   # 실행한 SQL도 출력
-    uv run portfolio-agent --ontology abc   # 온톨로지 지식을 프롬프트에 넣음 (off|ab|abc, 기본 off)
-    uv run portfolio-agent --enforce        # 규칙을 코드가 강제 (DESC NULLS LAST, 등급·시각 함수 오류, [적용 조건])
-    uv run portfolio-agent --slots          # 질문의 이름·등급·범주 값을 칸으로 뽑아 코드가 SQL 조각으로 바꿈
+    uv run financial-product-agent              # 대화 모드
+    uv run financial-product-agent -q "질문"     # 한 번만 질문
+    uv run financial-product-agent --show-sql   # 실행한 SQL도 출력
+    uv run financial-product-agent --ontology abc   # 온톨로지 지식을 프롬프트에 넣음 (off|ab|abc, 기본 off)
+    uv run financial-product-agent --enforce        # 규칙을 코드가 강제 (DESC NULLS LAST, 등급·시각 함수 오류, [적용 조건])
+    uv run financial-product-agent --slots          # 질문의 이름·등급·범주 값을 칸으로 뽑아 코드가 SQL 조각으로 바꿈
 """
 
 import argparse

@@ -87,8 +87,8 @@
 ### 5.2 구성 요소
 | 위치 | 역할 |
 |---|---|
-| `src/portfolio_agent/cli.py` `ask()` | 답변 문자열 대신 실행 기록(`AskTrace`)을 반환하도록 확장합니다. CLI는 `.answer`를 씁니다. |
-| `src/portfolio_agent/golden_eval.py` | 순수 채점 함수(결과 비교, 숫자 정규화, 키워드 판정)입니다. DB와 LLM 없이 단위 테스트할 수 있어야 합니다. |
+| `src/financial_product_agent/cli.py` `ask()` | 답변 문자열 대신 실행 기록(`AskTrace`)을 반환하도록 확장합니다. CLI는 `.answer`를 씁니다. |
+| `src/financial_product_agent/golden_eval.py` | 순수 채점 함수(결과 비교, 숫자 정규화, 키워드 판정)입니다. DB와 LLM 없이 단위 테스트할 수 있어야 합니다. |
 | `scripts/eval_golden.py` | 실행, 채점, 요약, 비교를 맡는 CLI입니다. |
 | `tests/test_golden_eval.py` | 채점 함수의 단위 테스트입니다. 마커가 없어 `-m "not db"`에서도 돕니다. |
 | `data/golden_runs/` | 실행 결과 JSONL과 요약 Markdown을 둡니다. |

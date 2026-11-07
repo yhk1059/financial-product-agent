@@ -1,6 +1,6 @@
 """도메인 규칙 로딩 테스트 (DB·LLM 불필요)."""
 
-from portfolio_agent import prompts
+from financial_product_agent import prompts
 
 
 def _load(tmp_path, monkeypatch, text: str | None) -> dict[str, str]:

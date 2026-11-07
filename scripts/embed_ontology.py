@@ -4,16 +4,16 @@ uv run python scripts/embed_ontology.py            # 바뀐 문서만 임베딩
 uv run python scripts/embed_ontology.py --dry-run  # API·쓰기 없이 조립된 문서와 할 일만 출력
 
 - 먼저 scripts/load_ontology.py로 YAML을 적재해 둔다. 문서 재료는 knowledge 테이블에서 읽는다.
-- 문서 조립: portfolio_agent.embedding (term_doc, rule_doc). content_sha가 같으면 다시 부르지 않는다.
+- 문서 조립: financial_product_agent.embedding (term_doc, rule_doc). content_sha가 같으면 다시 부르지 않는다.
 - 더 이상 없는 항목의 벡터는 지운다. 쓰기는 API 호출이 끝난 뒤 트랜잭션 하나로 한다.
 """
 
 import argparse
 import time
 
-from portfolio_agent import db
-from portfolio_agent.config import KNOWLEDGE_DDL_PATH
-from portfolio_agent.embedding import (
+from financial_product_agent import db
+from financial_product_agent.config import KNOWLEDGE_DDL_PATH
+from financial_product_agent.embedding import (
     EMBED_MODEL,
     VARIANT,
     content_sha,

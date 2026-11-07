@@ -5,8 +5,8 @@ import json
 import pytest
 import yaml
 
-from portfolio_agent.config import GOLDEN_DIR
-from portfolio_agent.golden_eval import (
+from financial_product_agent.config import GOLDEN_DIR
+from financial_product_agent.golden_eval import (
     check_answer,
     check_forbidden,
     check_mentions,
@@ -227,7 +227,7 @@ def test_refusal_rejects_wrong_reason():
 
 # ───────────── 컬럼 진단 ─────────────
 def test_sql_columns_drops_aliases_and_ctes():
-    from portfolio_agent.golden_eval import sql_columns
+    from financial_product_agent.golden_eval import sql_columns
 
     assert sql_columns(QUESTIONS["C1-01"]["gold_sql"]) == {"curr_cd", "buyable_quantity", "crd_grd"}
     assert "n" not in sql_columns(QUESTIONS["C4-06"]["gold_sql"])  # CTE 컬럼 별칭

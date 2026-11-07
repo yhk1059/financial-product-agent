@@ -14,10 +14,10 @@ PostgreSQL `public` 스키마의 금융상품 테이블 5개에 자연어로 질
 
 ```bash
 uv sync
-uv run portfolio-agent                                   # 대화 모드 (/new = 새 스레드, exit = 종료)
-uv run portfolio-agent -q "질문" --show-sql [--ontology off|ab|abc]   # 한 번만. --ontology는 온톨로지 컨텍스트를 넣음 (기본 off)
-uv run portfolio-agent -q "질문" --show-sql --enforce   # 기계적 규칙을 코드가 강제 (sql_rules.py, 기본 off)
-uv run portfolio-agent -q "질문" --show-sql --slots     # analyze_question + resolve_slots로 이름·등급·범주를 SQL 조각으로 (기본 off, 턴당 LLM 호출 +1)
+uv run financial-product-agent                          # 대화 모드 (/new = 새 스레드, exit = 종료)
+uv run financial-product-agent -q "질문" --show-sql [--ontology off|ab|abc]   # 한 번만. --ontology는 온톨로지 컨텍스트를 넣음 (기본 off)
+uv run financial-product-agent -q "질문" --show-sql --enforce   # 기계적 규칙을 코드가 강제 (sql_rules.py, 기본 off)
+uv run financial-product-agent -q "질문" --show-sql --slots     # analyze_question + resolve_slots로 이름·등급·범주를 SQL 조각으로 (기본 off, 턴당 LLM 호출 +1)
 uv run pytest                                            # 전체 테스트
 uv run pytest tests/test_sql_guard.py                    # 순수 단위 테스트, DB·LLM 불필요
 uv run pytest -m "not db"                                # PostgreSQL이 필요한 테스트 제외
@@ -43,7 +43,7 @@ pytest 마커: `db`(PostgreSQL 필요), `llm`(HyperCLOVA X 호출). 2026-11-07 �
 
 | 경로 | 내용 |
 |---|---|
-| `src/portfolio_agent/` | 에이전트 패키지(평면 구조, 모듈 18개). 하위 패키지 분리는 2026-11-06에 보류했다 |
+| `src/financial_product_agent/` | 에이전트 패키지(평면 구조, 모듈 18개). 하위 패키지 분리는 2026-11-06에 보류했다 |
 | `scripts/` | 스키마 캐시·온톨로지 적재·임베딩·골든 검증·채점. 패키지만 import하고 스크립트끼리는 import하지 않는다 |
 | `tests/` | 모듈별 pytest 파일 하나씩 |
 | `golden/` | `design.md`(정본), `questions_v2.yaml`·`gold_results_v2.json`, `holdout_v2.yaml`·`gold_results_holdout_v2.json`, `review_sheet.md`(생성물), `analysis/`(측정 기록). `gold_results_*.json`·`review_sheet.md`·`analysis/`는 데이터 값이 들어 있어 gitignore(로컬 전용) |
@@ -55,7 +55,7 @@ pytest 마커: `db`(PostgreSQL 필요), `llm`(HyperCLOVA X 호출). 2026-11-07 �
 
 ## 아키텍처
 
-그래프(`src/portfolio_agent/graph.py`):
+그래프(`src/financial_product_agent/graph.py`):
 
 ```
 START → select_tables → [retrieve_knowledge] → [analyze_question → resolve_slots] → generate_query ─┬─(도구 호출 없음)→ END
@@ -89,7 +89,7 @@ START → select_tables → [retrieve_knowledge] → [analyze_question → resol
 
 골든 데이터셋은 `golden/`에 있습니다. `design.md`가 해석 정책(P-*), 문항 형식(§4), 채점(§5), 결정 기록(§8)의 정본입니다. `questions_v2.yaml`(현재. v1은 2026-11-07에 삭제했고 그 결정은 design.md §8에 있음)에 `gold_sql`이 있는 30문항(C1–C6)이 있습니다. `verify_golden.py`가 문항별 `sql_sha`를 포함한 `gold_results_v2.json`을 씁니다. `eval_golden.py`의 `VERSION` 상수와 `verify_golden.py`의 `--version` 기본값이 버전을 고릅니다. 해시가 오래되면 `eval_golden.py`가 실행을 거부하므로 `gold_sql`을 고친 뒤에는 `verify_golden.py`를 다시 돌립니다.
 
-채점(`src/portfolio_agent/golden_eval.py`, 순수 함수, `tests/test_golden_eval.py`로 단위 테스트)은 LLM 없는 규칙 기반입니다:
+채점(`src/financial_product_agent/golden_eval.py`, 순수 함수, `tests/test_golden_eval.py`로 단위 테스트)은 LLM 없는 규칙 기반입니다:
 - **실행 정확도:** 성공한 에이전트 SQL을 다시 실행해(자르지 않음, 가드 LIMIT 200) 컬럼 이름이 아니라 값으로 정답과 비교합니다. 타입: `count`/`scalar`는 그 값이 든 행 하나, `list`는 집합 또는 순서 있는 상위 N, `table`은 키 튜플의 다중집합. `label_columns`(정답 SQL이 만든 리터럴, 예: C5-01 `market`)는 일대일 대응으로 맞춥니다. 마지막 성공 쿼리를 먼저 보고 그다음 앞선 쿼리를 봅니다(`exec_match: earlier`). `table`은 여러 쿼리에 나뉜 결과도 `union`으로 인정합니다. `key_alternatives`(예: `pd_abrv_nm` → `pd_nm`, `pd_itm_no`)로 같은 상품을 다른 식별자 컬럼으로도 맞출 수 있습니다(실행·답변 검사 모두).
 - **숫자:** 소수점 2자리로 반올림해 같거나 에이전트가 쓴 자릿수로 반올림해 같으면 같은 것으로 봅니다. 정수는 정확히 같아야 합니다. `scalar`는 ×100/÷100도 받습니다(`scale_variant`).
 - **답변 텍스트:** `answer_ok`는 정답 키 값(10개 이하)이 답변에 나오는지입니다. `mention_keywords`(`'a|b'` 동의어, `must_mention`과 정렬)와 C6의 `forbidden_patterns`(정규식)도 검사합니다. 언급 키워드는 질문 자체에 나오면 안 되고(스키마 테스트), C6는 일반적인 "찾을 수 없다"가 아니라 문항 고유의 거절 이유를 요구합니다. `ungrounded_numbers`는 참고용입니다. `columns_missing`/`columns_extra`도 참고용입니다: 정답 SQL과 에이전트의 마지막 성공 SQL이 참조한 실제 스키마 컬럼(별칭은 `schema_catalog.json`으로 걸러냄)의 차이로 `wrong_result`를 진단합니다.
@@ -110,8 +110,8 @@ START → select_tables → [retrieve_knowledge] → [analyze_question → resol
 - `review_log.yaml`: 사람의 결정(merge/drop/derive/demote/keep_low_confidence), 출처 충돌, 일회성 읽기 전용 프로파일링 결과, 열린 질문, 검토 승인.
 - 모든 항목에 `motivated_by`(골든 id, 추적용. 렌더링할 때는 뺌)가 있습니다. 정의는 문항별 사실이 아니라 일반 개념이어야 합니다. 문항 id, `examples` 밖의 골든 고유명사, 복사한 정답 SQL 조건은 `tests/test_ontology.py`에서 린트 실패입니다.
 - PostgreSQL 사본: YAML이 정본이고 `knowledge` 스키마는 사본입니다. `scripts/load_ontology.py`가 `ontology/sql/knowledge_schema.sql`(멱등 DDL)을 적용하고 트랜잭션 하나로 모든 행을 지우고 다시 넣으므로 테이블을 손으로 고치지 마세요. 모든 참조(`canonical`, `applies_to`, 항목을 가리키는 `confusable_with`, `overrides`/`depends_on`)는 `item`으로의 FK라 잘못된 참조는 적재 전체를 롤백합니다. 항목이 아닌 `confusable_with` 대상은 `term_confusable.target_text`로 갑니다. `attribute_resolved`는 상속된 속성을 펼칩니다. `source_version`은 git 커밋·dirty 여부·파일 해시를 기록합니다. `financial_agent_reader`는 `item_motivation`(골든 id. 검색 채점 전용)을 뺀 전부를 SELECT할 수 있습니다. YAML을 고친 뒤에는 적재기를 다시 돌립니다.
-- 프롬프트 층(항목이 프롬프트에 닿는 방식. 상수는 `src/portfolio_agent/retrieval.py`에 있고 아직 YAML에는 없음): **A** = 테이블 선택에 붙음(개념·속성·관계와 속성 전용 규칙 `LAYER_A_RULES`). **B** = 항상 포함(`LAYER_B_ITEMS`: 공통 규칙 여섯 개와 `as_of_date` 용어. 매 질문마다 토큰을 쓰니 작게 유지). **C** = 질문마다 검색으로 고름(나머지 용어·규칙 전부). 항목이 필요한지 알려면 무엇을 봐야 하는지로 정합니다: 테이블 → A, 아무것도 → B, 질문의 단어 → C.
-- 임베딩·검색: `embed_ontology.py`가 용어마다(이름 + 같은 말 + 정의) 규칙마다(`when` + `applies_to` 대상 이름. `then` 제외) 문서 하나를 만들어 `portfolio_agent.embedding`으로 CLOVA 임베딩 v2(`bge-m3`, 1024차원, 코사인)를 호출하고 `knowledge.item_embedding`에 저장합니다(`item`으로의 FK 없음. 그래서 온톨로지를 다시 적재해도 벡터는 남고, `content_sha`가 바뀐 문서만 다시 임베딩). 검색(`portfolio_agent.retrieval`, 순수 함수, `tests/test_retrieval.py`)은 C층 항목을 pgvector 코사인, 키워드(이름·같은 말·`order_values`. 규칙은 대상의 점수를 물려받음), RRF 하이브리드로 매깁니다. 기본은 `hybrid`, k=15이고 골든으로만 정했습니다(2026-10-19 골든 recall@15 94.8%). 남은 누락은 대부분 상품 이름(`R-name-exact`, `product_name`)이라 사전이 아니라 값 연결이 필요합니다. k와 방식은 골든으로 튜닝합니다. `portfolio_agent.search`가 DB 쪽 조각(`load_index`, `vector_rank`, 캐시되는 `question_vector`, `search(question)` = 하이브리드 상위 `DEFAULT_K`, 임베딩 실패 시 키워드만, `motivation_gold`)을 들고 있고 에이전트·`eval_retrieval.py`·`render_context.py`가 함께 씁니다. 질문 임베딩은 `data/retrieval_cache/`(질문 sha256 키)에 캐시하고 결과는 `data/retrieval_runs/`에 갑니다(둘 다 gitignore).
-- 렌더링(`portfolio_agent.context`, 책 7-2/7-3. 읽기 계정으로 `knowledge` 스키마를 읽는 `load_knowledge`(와 에이전트가 쓰는 `lru_cache` 래퍼 `get_knowledge`)를 빼면 순수 함수. `tests/test_context.py`): `build_context(kn, tables, c_ids)`는 `rules_text`(`{rules}`용: B층 공통 규칙, 그다음 C층 용어·규칙)와 `tables_text`(A층. 스키마 카드 뒤에 붙음: 입도·식별자·하위 유형이 있는 개념, 단위·NULL·0의 의미·메모가 있는 속성 줄, 테이블에 닿는 관계, 대상이 테이블에 있는 `LAYER_A_RULES`)를 돌려줍니다. C층 단계 순서: 선택된 테이블과 무관한 항목 제거(`is_related`. 용어와 한 테이블의 그 용어 버전을 함께 대상으로 하는 규칙, 예: `R-sale-fund` = `on_sale` + `FundClass.sale_yn`은 그 테이블에만 해당. `in_data: false` 용어는 항상 해당), 그다음 `depends_on` 대상을 한 단계 더함. `overrides` 대상은 끌어오지 않고 규칙 줄이 덮어쓰는 기본값을 인용합니다. 용어는 canonical 참조를 선택된 테이블로 한정해 실제 `table.column='value'`로 보여 줍니다. 뺀 것: `motivated_by`, `evidence`, `generalized_from`, `confusable_with`(보류). `render_context.py`는 테이블 선택 대신 골든 `tables`(구성종목이 있으면 `select_tables`처럼 `pref01n001` 추가)를 쓰고 토큰이 아니라 글자 수를 잽니다(로컬 HCX 토크나이저 없음). 2026-10-19: `generate_query` 프롬프트 중앙값 5,050 → 8,646자(1.68배, 최대 2.10배), C층 15 → 중앙값 10항목, recall 94.8% → 93.4%. 빠진 "정답" 항목은 일반화된 테이블 간 판매 규칙(C1-01/C1-06의 `R-sale-domestic-listed`/`-overseas-listed`)뿐이고 진짜 누락은 아닙니다. 일부 규칙 글이 아직 YAML 필드 이름(`zero_means`, `in_data false`, `glossary …`)을 쓰므로 나중에 `rules.yaml`에서 고칩니다. 출력은 `data/context_runs/`(gitignore)에 갑니다.
+- 프롬프트 층(항목이 프롬프트에 닿는 방식. 상수는 `src/financial_product_agent/retrieval.py`에 있고 아직 YAML에는 없음): **A** = 테이블 선택에 붙음(개념·속성·관계와 속성 전용 규칙 `LAYER_A_RULES`). **B** = 항상 포함(`LAYER_B_ITEMS`: 공통 규칙 여섯 개와 `as_of_date` 용어. 매 질문마다 토큰을 쓰니 작게 유지). **C** = 질문마다 검색으로 고름(나머지 용어·규칙 전부). 항목이 필요한지 알려면 무엇을 봐야 하는지로 정합니다: 테이블 → A, 아무것도 → B, 질문의 단어 → C.
+- 임베딩·검색: `embed_ontology.py`가 용어마다(이름 + 같은 말 + 정의) 규칙마다(`when` + `applies_to` 대상 이름. `then` 제외) 문서 하나를 만들어 `financial_product_agent.embedding`으로 CLOVA 임베딩 v2(`bge-m3`, 1024차원, 코사인)를 호출하고 `knowledge.item_embedding`에 저장합니다(`item`으로의 FK 없음. 그래서 온톨로지를 다시 적재해도 벡터는 남고, `content_sha`가 바뀐 문서만 다시 임베딩). 검색(`financial_product_agent.retrieval`, 순수 함수, `tests/test_retrieval.py`)은 C층 항목을 pgvector 코사인, 키워드(이름·같은 말·`order_values`. 규칙은 대상의 점수를 물려받음), RRF 하이브리드로 매깁니다. 기본은 `hybrid`, k=15이고 골든으로만 정했습니다(2026-10-19 골든 recall@15 94.8%). 남은 누락은 대부분 상품 이름(`R-name-exact`, `product_name`)이라 사전이 아니라 값 연결이 필요합니다. k와 방식은 골든으로 튜닝합니다. `financial_product_agent.search`가 DB 쪽 조각(`load_index`, `vector_rank`, 캐시되는 `question_vector`, `search(question)` = 하이브리드 상위 `DEFAULT_K`, 임베딩 실패 시 키워드만, `motivation_gold`)을 들고 있고 에이전트·`eval_retrieval.py`·`render_context.py`가 함께 씁니다. 질문 임베딩은 `data/retrieval_cache/`(질문 sha256 키)에 캐시하고 결과는 `data/retrieval_runs/`에 갑니다(둘 다 gitignore).
+- 렌더링(`financial_product_agent.context`, 책 7-2/7-3. 읽기 계정으로 `knowledge` 스키마를 읽는 `load_knowledge`(와 에이전트가 쓰는 `lru_cache` 래퍼 `get_knowledge`)를 빼면 순수 함수. `tests/test_context.py`): `build_context(kn, tables, c_ids)`는 `rules_text`(`{rules}`용: B층 공통 규칙, 그다음 C층 용어·규칙)와 `tables_text`(A층. 스키마 카드 뒤에 붙음: 입도·식별자·하위 유형이 있는 개념, 단위·NULL·0의 의미·메모가 있는 속성 줄, 테이블에 닿는 관계, 대상이 테이블에 있는 `LAYER_A_RULES`)를 돌려줍니다. C층 단계 순서: 선택된 테이블과 무관한 항목 제거(`is_related`. 용어와 한 테이블의 그 용어 버전을 함께 대상으로 하는 규칙, 예: `R-sale-fund` = `on_sale` + `FundClass.sale_yn`은 그 테이블에만 해당. `in_data: false` 용어는 항상 해당), 그다음 `depends_on` 대상을 한 단계 더함. `overrides` 대상은 끌어오지 않고 규칙 줄이 덮어쓰는 기본값을 인용합니다. 용어는 canonical 참조를 선택된 테이블로 한정해 실제 `table.column='value'`로 보여 줍니다. 뺀 것: `motivated_by`, `evidence`, `generalized_from`, `confusable_with`(보류). `render_context.py`는 테이블 선택 대신 골든 `tables`(구성종목이 있으면 `select_tables`처럼 `pref01n001` 추가)를 쓰고 토큰이 아니라 글자 수를 잽니다(로컬 HCX 토크나이저 없음). 2026-10-19: `generate_query` 프롬프트 중앙값 5,050 → 8,646자(1.68배, 최대 2.10배), C층 15 → 중앙값 10항목, recall 94.8% → 93.4%. 빠진 "정답" 항목은 일반화된 테이블 간 판매 규칙(C1-01/C1-06의 `R-sale-domestic-listed`/`-overseas-listed`)뿐이고 진짜 누락은 아닙니다. 일부 규칙 글이 아직 YAML 필드 이름(`zero_means`, `in_data false`, `glossary …`)을 쓰므로 나중에 `rules.yaml`에서 고칩니다. 출력은 `data/context_runs/`(gitignore)에 갑니다.
 - 정의가 충돌할 때의 출처 우선순위: `golden/design.md` 정책·결정 > 실제 데이터 > `schema_catalog.json` > `questions_v2.yaml` 메모 > `docs/domain_rules_legacy.md`(옛 규칙. 에이전트는 읽지 않음). 정책이나 정답이 바뀌면 해당 온톨로지 항목과 `review_log.yaml`을 고칩니다.
 - 2026-10-21에 SQL 생성을 도구 호출에서 구조화 출력(`QueryStep`)으로 바꿨습니다. 그 전 골든 실행(`base`, `base_v2`, `onto_ab`, `onto_abc`, `smoke`)은 생성 방식이 달라 기준선이 아니며 파일은 `data/golden_runs/archive/`에 있습니다. 현재 기준선은 `runs.md`에 있습니다. 평가 요약의 비용 표에는 `생성 실패(문항 수)` 행(`generation_errors`가 있는 문항)이 있습니다.

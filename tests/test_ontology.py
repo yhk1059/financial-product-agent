@@ -9,8 +9,8 @@ import sqlglot
 import yaml
 from sqlglot import exp
 
-from portfolio_agent.config import ALLOWED_TABLES, GOLDEN_DIR, ONTOLOGY_DIR
-from portfolio_agent.schema_catalog import load_catalog
+from financial_product_agent.config import ALLOWED_TABLES, GOLDEN_DIR, ONTOLOGY_DIR
+from financial_product_agent.schema_catalog import load_catalog
 
 MODEL = yaml.safe_load((ONTOLOGY_DIR / "model.yaml").read_text())
 GLOSSARY = yaml.safe_load((ONTOLOGY_DIR / "glossary.yaml").read_text())["terms"]

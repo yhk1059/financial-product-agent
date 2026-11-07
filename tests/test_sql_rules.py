@@ -2,8 +2,8 @@
 
 import pytest
 
-from portfolio_agent import sql_rules
-from portfolio_agent.sql_rules import (applied_conditions, name_literals, ordered_columns, result_note, rewrite,
+from financial_product_agent import sql_rules
+from financial_product_agent.sql_rules import (applied_conditions, name_literals, ordered_columns, result_note, rewrite,
                                        violations)
 
 CREDIT = ["AAA", "AA+", "AA0", "AA-", "A+"]
@@ -272,7 +272,7 @@ def test_avg_discloses_only_high_missing():
 
 # ───────────────────────── 단위·현금성·집합 논리 ─────────────────────────
 
-from portfolio_agent.sql_rules import rule_violations
+from financial_product_agent.sql_rules import rule_violations
 
 UNITS = {"prbd01n001": ("pd_no", "buyable_quantity")}
 CLASS_IDS = {"prfd01n001": frozenset({"itm_no", "rptt_ksd_itm_no"})}

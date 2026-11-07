@@ -4,8 +4,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END
 
-from portfolio_agent import graph
-from portfolio_agent.context import Context
+from financial_product_agent import graph
+from financial_product_agent.context import Context
 
 
 def test_off_has_no_retrieve_node():
@@ -74,12 +74,12 @@ def test_oracle_without_ids_is_ab(calls):
 
 
 def test_chat_cli_has_no_oracle():
-    from portfolio_agent.config import ONTOLOGY_MODES
+    from financial_product_agent.config import ONTOLOGY_MODES
     assert "oracle" not in ONTOLOGY_MODES
 
 
 def test_ask_passes_oracle_ids():
-    from portfolio_agent import cli
+    from financial_product_agent import cli
 
     seen = []
 
@@ -231,7 +231,7 @@ def test_generate_query_sends_text_history(fake_llm):
 
 def test_ask_records_generation_error():
     """cli.ask는 generate_query의 generation_error를 AskTrace.generation_errors에 모은다."""
-    from portfolio_agent import cli
+    from financial_product_agent import cli
 
     class FakeAgent:
         def stream(self, inputs, config, stream_mode):
@@ -285,7 +285,7 @@ def test_enforce_rewrites_tool_call_sql(fake_llm):
 
 @pytest.mark.parametrize("give_up", [False, True])
 def test_enforce_appends_applied_conditions(fake_llm, monkeypatch, give_up):
-    from portfolio_agent import sql_rules
+    from financial_product_agent import sql_rules
     monkeypatch.setattr(sql_rules, "load_catalog", lambda: ENF_CATALOG)
     state = _turn_state(graph.settings.max_query_attempts if give_up else 1)
     out = graph.FinalAnswer(answer="3개입니다.") if give_up else _step("answer", answer="3개입니다.")
@@ -313,7 +313,7 @@ def test_slot_nodes_only_with_slots():
 
 
 def test_analyze_question_returns_slots(fake_llm):
-    from portfolio_agent.slots import QuestionSlots
+    from financial_product_agent.slots import QuestionSlots
 
     fake_llm.outputs = [QuestionSlots(names=[], grades=[], values=["MMF"])]
     out = graph.analyze_question(BASE)
@@ -365,7 +365,7 @@ def test_generate_query_uses_resolved(fake_llm):
 
 
 def test_enforce_appends_name_interpretation(fake_llm, monkeypatch):
-    from portfolio_agent import sql_rules
+    from financial_product_agent import sql_rules
 
     monkeypatch.setattr(sql_rules, "load_catalog", lambda: ENF_CATALOG)
     fake_llm.outputs = [_step("answer", answer="답")]
@@ -389,8 +389,8 @@ class _ScriptedLLM:
 def test_slot_graph_end_to_end(monkeypatch):
     """--enforce --slots 그래프: 칸은 턴마다 한 번만 뽑고, run_query가 상태의 resolved로 집합 불일치를 막는다(G4).
     두 번 막은 뒤 세 번째는 실행하고 알림만 붙인다."""
-    from portfolio_agent import tools
-    from portfolio_agent.slots import QuestionSlots
+    from financial_product_agent import tools
+    from financial_product_agent.slots import QuestionSlots
 
     resolved = [{"slot": "grade", "kind": "", "text": "신용등급 'AA-' 이상", "status": "confirmed",
                  "table": "prbd01n001", "column": "crd_grd", "values": ["AAA", "AA+"], "note": "",

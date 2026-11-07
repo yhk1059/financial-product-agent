@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 
 import yaml
 
-from portfolio_agent import db
-from portfolio_agent.config import KNOWLEDGE_DDL_PATH, ONTOLOGY_DIR, PROJECT_ROOT
+from financial_product_agent import db
+from financial_product_agent.config import KNOWLEDGE_DDL_PATH, ONTOLOGY_DIR, PROJECT_ROOT
 
 FILES = ("model.yaml", "glossary.yaml", "rules.yaml", "review_log.yaml")
 

@@ -22,10 +22,17 @@ from pathlib import Path
 import psycopg
 import yaml
 
-from portfolio_agent import db
-from portfolio_agent.config import DATA_DIR, EVAL_ONTOLOGY_MODES, GOLDEN_DIR, ONTOLOGY_DIR, PROJECT_ROOT, settings
-from portfolio_agent.golden_eval import grade, sql_sha, to_json
-from portfolio_agent.sql_guard import SQLGuardError, validate
+from financial_product_agent import db
+from financial_product_agent.config import (
+    DATA_DIR,
+    EVAL_ONTOLOGY_MODES,
+    GOLDEN_DIR,
+    ONTOLOGY_DIR,
+    PROJECT_ROOT,
+    settings,
+)
+from financial_product_agent.golden_eval import grade, sql_sha, to_json
+from financial_product_agent.sql_guard import SQLGuardError, validate
 
 VERSION = "v2"
 RUNS_DIR = DATA_DIR / "golden_runs"
@@ -92,7 +99,7 @@ def oracle_items() -> dict[str, list[str]]:
 
 
 def run_one(agent, q: dict, gold: dict, meta: dict, oracle_ids: list[str] | None = None) -> dict:
-    from portfolio_agent.cli import ask  # 재채점·비교만 할 때는 LLM 모듈을 불러오지 않는다
+    from financial_product_agent.cli import ask  # 재채점·비교만 할 때는 LLM 모듈을 불러오지 않는다
 
     record = {"id": q["id"], "category": q["category"], "difficulty": q["difficulty"], **meta}
     try:
@@ -115,7 +122,7 @@ def print_row(r: dict) -> None:
 
 
 def run(args) -> None:
-    from portfolio_agent.graph import build_chat_agent
+    from financial_product_agent.graph import build_chat_agent
 
     questions, gold = load_golden(args.set)
     if args.only:

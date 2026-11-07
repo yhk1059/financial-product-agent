@@ -1,6 +1,6 @@
 """retrieval.py 순수 함수 테스트 (DB·LLM 없음)."""
 
-from portfolio_agent.retrieval import (
+from financial_product_agent.retrieval import (
     LAYER_A_RULES,
     LAYER_B_ITEMS,
     keyword_rank,
